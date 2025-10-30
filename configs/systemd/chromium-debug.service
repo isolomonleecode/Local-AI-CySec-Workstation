@@ -1,0 +1,14 @@
+[Unit]
+Description=Chromium Debug Mode for Puppeteer
+After=graphical.target
+
+[Service]
+Type=simple
+User=ssjlox
+Environment="DISPLAY=:0"
+ExecStart=/usr/bin/chromium --remote-debugging-port=9222 --user-data-dir=/tmp/chromium-debug --headless=new
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=graphical.target
