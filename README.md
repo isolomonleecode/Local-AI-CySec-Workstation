@@ -1,6 +1,6 @@
 # Local AI Cybersecurity Workstation
 
-**Author:** ssjlox
+**Author:** isolomonlee
 **Status:** Production
 **Certifications:** CompTIA Security+
 **Focus Areas:** AI-Enhanced Security Operations, Security Automation, Threat Intelligence
