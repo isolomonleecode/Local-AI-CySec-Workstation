@@ -1,0 +1,364 @@
+{
+  "name": "Incident Response Automation",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "wazuh-alerts",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "name": "Wazuh Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [250, 300],
+      "webhookId": "wazuh-incident-response"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse Wazuh alert payload\nconst items = [];\n\nfor (const item of $input.all()) {\n  const alert = item.json;\n  \n  // Extract key fields\n  const ruleId = alert.rule?.id || 'unknown';\n  const ruleLevel = alert.rule?.level || 0;\n  const ruleDescription = alert.rule?.description || 'No description';\n  const agentName = alert.agent?.name || 'unknown';\n  const srcIp = alert.data?.srcip || alert.data?.src_ip || 'N/A';\n  const dstIp = alert.data?.dstip || alert.data?.dst_ip || 'N/A';\n  const fullLog = alert.full_log || JSON.stringify(alert.data || {});\n  \n  // Determine severity\n  let severity = 'LOW';\n  if (ruleLevel >= 12) severity = 'CRITICAL';\n  else if (ruleLevel >= 7) severity = 'HIGH';\n  else if (ruleLevel >= 4) severity = 'MEDIUM';\n  \n  items.push({\n    json: {\n      alert_id: alert.id || Date.now(),\n      timestamp: alert.timestamp || new Date().toISOString(),\n      rule_id: ruleId,\n      rule_level: ruleLevel,\n      rule_description: ruleDescription,\n      severity: severity,\n      agent_name: agentName,\n      src_ip: srcIp,\n      dst_ip: dstIp,\n      full_log: fullLog,\n      raw_alert: alert\n    }\n  });\n}\n\nreturn items;"
+      },
+      "name": "Parse Alert",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "mode": "rules",
+        "rules": {
+          "rules": [
+            {
+              "conditions": {
+                "string": [
+                  {
+                    "value1": "={{ $json.severity }}",
+                    "value2": "CRITICAL"
+                  }
+                ]
+              },
+              "renameOutput": true,
+              "outputKey": "critical"
+            },
+            {
+              "conditions": {
+                "string": [
+                  {
+                    "value1": "={{ $json.severity }}",
+                    "value2": "HIGH"
+                  }
+                ]
+              },
+              "renameOutput": true,
+              "outputKey": "high"
+            },
+            {
+              "conditions": {
+                "string": [
+                  {
+                    "value1": "={{ $json.severity }}",
+                    "operation": "notEquals",
+                    "value2": "CRITICAL"
+                  },
+                  {
+                    "value1": "={{ $json.severity }}",
+                    "operation": "notEquals",
+                    "value2": "HIGH"
+                  }
+                ]
+              },
+              "renameOutput": true,
+              "outputKey": "other"
+            }
+          ]
+        }
+      },
+      "name": "Route by Severity",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 1,
+      "position": [650, 300]
+    },
+    {
+      "parameters": {
+        "url": "=http://192.168.1.100:4000/v1/chat/completions",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "openAiApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"llama-3.1-8b\",\n  \"messages\": [\n    {\n      \"role\": \"system\",\n      \"content\": \"You are a SOC analyst performing alert triage. Analyze security alerts and provide:\\n1. TRUE POSITIVE or FALSE POSITIVE assessment with confidence %\\n2. Severity justification\\n3. Immediate recommended actions\\n4. IOCs to investigate (IPs, domains, hashes)\\n5. Potential attack kill chain phase\\nBe concise and actionable.\"\n    },\n    {\n      \"role\": \"user\",\n      \"content\": \"Alert Details:\\nRule: {{ $json.rule_description }}\\nSeverity: {{ $json.severity }} (Level {{ $json.rule_level }})\\nAgent: {{ $json.agent_name }}\\nSource IP: {{ $json.src_ip }}\\nDestination IP: {{ $json.dst_ip }}\\n\\nLog:\\n{{ $json.full_log }}\\n\\nProvide triage analysis.\"\n    }\n  ],\n  \"max_tokens\": 1500,\n  \"temperature\": 0.2\n}",
+        "options": {}
+      },
+      "name": "AI Triage (Critical)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [850, 100]
+    },
+    {
+      "parameters": {
+        "url": "=http://192.168.1.100:4000/v1/chat/completions",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "openAiApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"mistral-7b\",\n  \"messages\": [\n    {\n      \"role\": \"system\",\n      \"content\": \"You are a SOC analyst. Quickly assess this alert: TRUE/FALSE POSITIVE, recommended action, key IOCs.\"\n    },\n    {\n      \"role\": \"user\",\n      \"content\": \"Alert: {{ $json.rule_description }}\\nSource: {{ $json.src_ip }}\\nLog: {{ $json.full_log.substring(0, 500) }}\"\n    }\n  ],\n  \"max_tokens\": 800,\n  \"temperature\": 0.2\n}",
+        "options": {}
+      },
+      "name": "AI Triage (High)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [850, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract AI triage response\nconst items = [];\n\nfor (const item of $input.all()) {\n  const aiResponse = item.json.choices?.[0]?.message?.content || 'Analysis failed';\n  \n  // Parse AI response for true/false positive\n  const isTruePositive = aiResponse.toLowerCase().includes('true positive');\n  const confidence = aiResponse.match(/(\\d+)%/)?.[1] || '50';\n  \n  items.push({\n    json: {\n      ...item.json,\n      ai_triage: aiResponse,\n      is_true_positive: isTruePositive,\n      confidence: parseInt(confidence),\n      triage_timestamp: new Date().toISOString()\n    }\n  });\n}\n\nreturn items;"
+      },
+      "name": "Extract Triage",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [1050, 200]
+    },
+    {
+      "parameters": {
+        "url": "=http://192.168.1.100:4000/v1/chat/completions",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "openAiApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"qwen3-30b\",\n  \"messages\": [\n    {\n      \"role\": \"user\",\n      \"content\": \"Analyze IP address {{ $json.src_ip }} for threat intelligence:\\n1. Known malicious activity\\n2. Geographic location\\n3. Associated threat campaigns\\n4. Threat score (0-100)\\n5. Recommended blocking action\\nBe brief and actionable.\"\n    }\n  ],\n  \"max_tokens\": 800,\n  \"temperature\": 0.1\n}",
+        "options": {}
+      },
+      "name": "Threat Intel Enrichment",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [1250, 200]
+    },
+    {
+      "parameters": {
+        "url": "=http://192.168.1.100:3001/api/annotations",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "specifyHeaders": "json",
+        "jsonHeaders": "={\n  \"Content-Type\": \"application/json\",\n  \"Authorization\": \"Bearer YOUR_GRAFANA_API_KEY\"\n}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"dashboardId\": 1,\n  \"panelId\": 1,\n  \"tags\": [\"incident\", \"{{ $json.severity }}\", \"{{ $json.is_true_positive ? 'true-positive' : 'false-positive' }}\"],\n  \"text\": \"{{ $json.rule_description }} - {{ $json.ai_triage.substring(0, 150) }}...\",\n  \"time\": {{ Date.now() }}\n}",
+        "options": {}
+      },
+      "name": "Update Grafana",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [1450, 200]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.is_true_positive }}",
+              "value2": true
+            }
+          ],
+          "number": [
+            {
+              "value1": "={{ $json.confidence }}",
+              "operation": "largerEqual",
+              "value2": 70
+            }
+          ]
+        }
+      },
+      "name": "High Confidence True Positive?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [1650, 200]
+    },
+    {
+      "parameters": {
+        "channel": "#security-alerts",
+        "text": "=🚨 **CRITICAL INCIDENT DETECTED**\\n\\n**Alert:** {{ $json.rule_description }}\\n**Severity:** {{ $json.severity }}\\n**Agent:** {{ $json.agent_name }}\\n**Source IP:** {{ $json.src_ip }}\\n**Confidence:** {{ $json.confidence }}%\\n\\n**AI Assessment:**\\n{{ $json.ai_triage }}\\n\\n**Threat Intel:**\\n{{ $json.threat_intel }}\\n\\n**Recommended Actions:**\\n1. Investigate immediately\\n2. Review related logs\\n3. Consider IP blocking",
+        "attachments": []
+      },
+      "name": "Alert Slack",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 1,
+      "position": [1850, 100]
+    },
+    {
+      "parameters": {
+        "url": "=https://192.168.1.100:55000/active-response",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "specifyHeaders": "json",
+        "jsonHeaders": "={\n  \"Content-Type\": \"application/json\"\n}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"command\": \"firewall-drop\",\n  \"arguments\": [\"-\", \"{{ $json.src_ip }}\", \"-\"],\n  \"alert\": {\n    \"data\": {\n      \"srcip\": \"{{ $json.src_ip }}\"\n    }\n  }\n}",
+        "options": {
+          "allowUnauthorizedCerts": true
+        }
+      },
+      "name": "Block IP (Wazuh Active Response)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [2050, 100]
+    },
+    {
+      "parameters": {
+        "content": "## Incident Response Automation\\n\\n**Trigger:** Wazuh webhook\\n\\n**Flow:**\\n1. Parse alert\\n2. Route by severity\\n3. AI triage analysis\\n4. Threat intel enrichment\\n5. Update Grafana\\n6. If high-confidence true positive:\\n   - Alert Slack/PagerDuty\\n   - Auto-block malicious IPs\\n\\n**Setup:**\\n1. Configure Wazuh integration webhook\\n2. Update IP addresses\\n3. Add Grafana API key\\n4. Configure Slack webhook",
+        "height": 400,
+        "width": 300
+      },
+      "name": "Sticky Note1",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [240, 460]
+    }
+  ],
+  "connections": {
+    "Wazuh Webhook": {
+      "main": [
+        [
+          {
+            "node": "Parse Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Alert": {
+      "main": [
+        [
+          {
+            "node": "Route by Severity",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route by Severity": {
+      "main": [
+        [
+          {
+            "node": "AI Triage (Critical)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "AI Triage (High)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Triage (Critical)": {
+      "main": [
+        [
+          {
+            "node": "Extract Triage",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Triage (High)": {
+      "main": [
+        [
+          {
+            "node": "Extract Triage",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Triage": {
+      "main": [
+        [
+          {
+            "node": "Threat Intel Enrichment",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Threat Intel Enrichment": {
+      "main": [
+        [
+          {
+            "node": "Update Grafana",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Grafana": {
+      "main": [
+        [
+          {
+            "node": "High Confidence True Positive?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "High Confidence True Positive?": {
+      "main": [
+        [
+          {
+            "node": "Alert Slack",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Alert Slack": {
+      "main": [
+        [
+          {
+            "node": "Block IP (Wazuh Active Response)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": ["security", "incident-response", "automation", "wazuh"],
+  "triggerCount": 1,
+  "updatedAt": "2025-12-05T00:00:00.000Z",
+  "versionId": "1.0"
+}
