@@ -1,0 +1,15 @@
+[Unit]
+Description=big-AGI Web Application
+After=network.target localai.service
+
+[Service]
+Type=simple
+User={{USER}}
+WorkingDirectory={{BIG_AGI_PATH}}
+Environment="NODE_ENV=production"
+ExecStart=/usr/bin/npm run dev
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

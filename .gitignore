@@ -5,6 +5,10 @@
 # Documentation (stored in centralized vault)
 docs/
 
+# User-specific systemd service files (use templates instead)
+configs/systemd/*.service
+!configs/systemd/*.service.template
+
 # API Keys and Secrets
 .env
 .env.local
