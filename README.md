@@ -96,7 +96,7 @@ docker-compose up -d
 - **Automated CVE Scanning** - Daily vulnerability monitoring
 - **Incident Response** - Real-time alert triage
 - **Threat Hunting** - AI-powered log analysis
-- **Job Application Tracker** - Resume automation
+- **Security Dashboards** - Wazuh-Grafana integration
 
 ---
 
@@ -148,11 +148,11 @@ curl http://localhost:4000/health
 - **Troubleshooting** - Common issues
 
 ### n8n Workflows
-Ready-to-import automation in [`n8n-workflows/`](n8n-workflows/):
-1. **vulnerability-scanner.json** - Daily CVE monitoring
-2. **incident-response.json** - Real-time alert triage
-3. **job-application-tracker.json** - Resume automation
-4. **wazuh-grafana-integration.json** - Security dashboards
+Ready-to-import security automation in [`n8n-workflows/`](n8n-workflows/):
+1. **vulnerability-scanner.json** - Daily CVE monitoring with AI analysis
+2. **incident-response.json** - Real-time alert triage & automated response
+3. **wazuh-grafana-integration.json** - Security metrics & dashboards
+4. **wazuh-n8n-integration.xml** - Wazuh webhook configuration
 
 ---
 
@@ -245,6 +245,6 @@ Local-AI-CySec-Workstation/
 
 ---
 
-**Author:** ssjlox | **Cert:** CompTIA Security+
+**Author:** isolomonlee | **Certifications:** CompTIA Security+
 
 **Last Updated:** December 6, 2025
