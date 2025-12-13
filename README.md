@@ -1,498 +1,375 @@
 # Local AI Cybersecurity Workstation
 
-**Author:** isolomonlee
-**Status:** Production
-**Certifications:** CompTIA Security+
-**Focus Areas:** AI-Enhanced Security Operations, Security Automation, Threat Intelligence
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Security: CompTIA](https://img.shields.io/badge/Security-CompTIA%20Sec%2B-red)](https://www.comptia.org/certifications/security)
 
-## Project Overview
+**GPU-accelerated, privacy-first AI workstation for cybersecurity professionals**
 
-A fully local, GPU-accelerated AI workstation designed for cybersecurity professionals who need privacy, control, and cutting-edge AI capabilities for security research, automation, and analysis—without relying on cloud APIs.
-
-**Key Capabilities:**
-- 🔒 **100% Local & Private:** All AI processing on-premises with AMD GPU acceleration
-- 🤖 **Multi-Model Support:** Run multiple open-source LLMs simultaneously
-- 🔐 **Security-Focused:** Designed for sensitive security work and research
-- ⚡ **GPU-Accelerated:** AMD ROCm/HIP for high-performance inference
-- 🛠️ **Cybersecurity Tooling:** Integrated with security automation workflows
-
-## Why Local AI for Cybersecurity?
-
-### Privacy & Compliance
-- ✅ **Data Sovereignty:** Sensitive security data never leaves your infrastructure
-- ✅ **No Cloud Dependency:** No API rate limits, no service outages
-- ✅ **Compliance-Ready:** GDPR, HIPAA, SOC 2 compliant by design
-- ✅ **Confidential Research:** Analyze malware, vulnerabilities, exploits privately
-
-### Cost & Control
-- ✅ **Zero API Costs:** No per-token pricing or monthly subscriptions
-- ✅ **Unlimited Usage:** Run as many queries as your hardware allows
-- ✅ **Custom Models:** Fine-tune models on your security datasets
-- ✅ **Full Control:** Choose models, parameters, and configurations
-
-### Security Use Cases
-- 🔍 **Vulnerability Analysis:** Analyze CVEs and security advisories with AI
-- 📝 **Security Documentation:** Auto-generate security reports and runbooks
-- 🔬 **Malware Analysis:** Safely analyze suspicious code and binaries
-- 🤖 **Security Automation:** AI-powered incident response and triage
-- 📊 **Log Analysis:** Intelligent log parsing and threat detection
-- 💻 **Code Review:** Automated security code review and SAST
-- 🎯 **Threat Intelligence:** Process and analyze threat feeds locally
-
-## Architecture
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                     Local AI Workstation                     │
-├─────────────────────────────────────────────────────────────┤
-│                                                               │
-│  ┌──────────────┐     ┌──────────────┐    ┌──────────────┐ │
-│  │   big-AGI    │────▶│   LocalAI    │◀───│ AMD GPU      │ │
-│  │   Web UI     │     │   Server     │    │ HIP/ROCm     │ │
-│  │  (Port 3000) │     │  (Port 8080) │    │ Acceleration │ │
-│  └──────────────┘     └──────────────┘    └──────────────┘ │
-│         │                     │                              │
-│         │                     ▼                              │
-│         │            ┌──────────────────┐                   │
-│         │            │   LLM Models     │                   │
-│         │            │   (.gguf files)  │                   │
-│         │            └──────────────────┘                   │
-│         │                                                    │
-│         ▼                                                    │
-│  ┌──────────────┐                                           │
-│  │  Chromium    │  (Web scraping & browser automation)      │
-│  │  Headless    │                                           │
-│  │  (Port 9222) │                                           │
-│  └──────────────┘                                           │
-│                                                               │
-└─────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-                    ┌──────────────────┐
-                    │ Security Tools   │
-                    │ & Automation     │
-                    └──────────────────┘
-```
-
-## Components
-
-### 1. LocalAI Server
-**Purpose:** GPU-accelerated local LLM inference server
-**Technology:** LocalAI (OpenAI-compatible API)
-**Hardware Acceleration:** AMD ROCm/HIP (GPU passthrough)
-**Port:** 8080
-**Container:** `localai/localai:latest-aio-gpu-hipblas`
-
-**Features:**
-- OpenAI-compatible API endpoints
-- Multiple model support (GGUF format)
-- GPU acceleration for fast inference
-- Text generation, embeddings, image generation
-- Compatible with OpenAI SDKs and tools
-
-**Supported Models:**
-- Llama 3.1/3.2 (8B, 70B)
-- Mistral/Mixtral
-- CodeLlama (for security code analysis)
-- DeepSeek Coder
-- Custom fine-tuned security models
-
-### 2. big-AGI Web Interface
-**Purpose:** Advanced AI chat interface for security workflows
-**Technology:** Next.js, React, TypeScript
-**Port:** 3000 (development)
-**Features:**
-- Multi-model chat (compare responses)
-- Beam mode (parallel model reasoning)
-- Code syntax highlighting
-- Markdown rendering with LaTeX
-- File upload and analysis
-- Conversation management
-- Persona system (security analyst, penetration tester, etc.)
-
-**Cybersecurity Personas:**
-- 🔒 Security Analyst
-- 🔴 Red Team Operator
-- 🔵 Blue Team Defender
-- 🔬 Malware Analyst
-- 📋 Compliance Auditor
-- 💻 Security Engineer
-
-### 3. Chromium Headless Browser
-**Purpose:** Web scraping, OSINT, and automated browsing for security research
-**Technology:** Chromium with remote debugging
-**Port:** 9222
-**Use Cases:**
-- Automated threat intelligence gathering
-- Vulnerability disclosure monitoring
-- Security blog/feed aggregation
-- OSINT reconnaissance
-- Automated security tool interaction
-
-## Hardware Requirements
-
-### Minimum Specifications
-- **CPU:** 6+ cores (AMD/Intel)
-- **RAM:** 16GB DDR4
-- **GPU:** AMD Radeon RX 5000 series or newer (8GB+ VRAM)
-- **Storage:** 100GB SSD (for models and data)
-- **OS:** Linux (Arch, Ubuntu, Debian)
-
-### Recommended Specifications
-- **CPU:** AMD Ryzen 7/9 or Intel i7/i9 (8+ cores)
-- **RAM:** 32GB+ DDR4/DDR5
-- **GPU:** AMD Radeon RX 6800/7900 (16GB+ VRAM)
-- **Storage:** 500GB NVMe SSD
-- **OS:** Arch Linux with latest ROCm drivers
-
-### Tested Configuration
-- **CPU:** AMD Ryzen 9 5900X
-- **RAM:** 64GB DDR4-3600
-- **GPU:** AMD Radeon RX 7900 XTX (24GB VRAM)
-- **Storage:** 2TB NVMe SSD
-- **OS:** Arch Linux (kernel 6.17.5-zen1)
-
-## Installation
-
-### Quick Start
-
-```bash
-# Clone repository
-git clone https://github.com/isolomonleecode/Local-AI-CySec-Workstation.git
-cd Local-AI-CySec-Workstation
-
-# Install dependencies
-./scripts/install-dependencies.sh
-
-# Configure systemd services
-sudo cp configs/systemd/*.service /etc/systemd/system/
-sudo systemctl daemon-reload
-
-# Start services
-sudo systemctl start localai.service
-sudo systemctl start chromium-debug.service
-sudo systemctl start big-agi.service
-
-# Enable on boot
-sudo systemctl enable localai.service chromium-debug.service big-agi.service
-
-# Check status
-systemctl status localai.service
-systemctl status big-agi.service
-```
-
-### Manual Installation
-
-See [docs/installation.md](docs/installation.md) for detailed step-by-step instructions.
-
-## Configuration
-
-### LocalAI Setup
-```bash
-# Edit LocalAI configuration
-vim configs/localai/config.yaml
-
-# Download models
-./scripts/download-models.sh llama-3.1-8b
-./scripts/download-models.sh codellama-13b
-
-# Test LocalAI
-curl http://localhost:8080/v1/models
-```
-
-### big-AGI Setup
-```bash
-# Configure environment
-cp configs/big-agi/.env.example configs/big-agi/.env
-vim configs/big-agi/.env
-
-# Set LocalAI endpoint
-LOCALAI_API_HOST=http://127.0.0.1:8080
-
-# Start big-AGI
-cd big-AGI
-npm install
-npm run dev
-
-# Access at http://localhost:3000
-```
-
-## Usage
-
-### Basic Chat Interface
-1. Open browser to `http://localhost:3000`
-2. Select LocalAI as provider in settings
-3. Choose model (e.g., llama-3.1-8b-instruct)
-4. Start chatting!
-
-### Security Use Cases
-
-#### Vulnerability Analysis
-```
-User: Analyze CVE-2025-1234 and provide:
-1. Attack vector analysis
-2. Affected versions
-3. Mitigation steps
-4. Detection signatures
-
-[AI provides detailed security analysis]
-```
-
-#### Code Security Review
-```
-User: Review this Python script for security issues:
-[paste code]
-
-[AI identifies SQL injection, XSS, hardcoded secrets, etc.]
-```
-
-#### Incident Response
-```
-User: I have suspicious traffic from 192.168.1.100. Analyze these logs:
-[paste logs]
-
-[AI provides IOCs, recommendations, and response steps]
-```
-
-#### Malware Analysis
-```
-User: Static analysis of this binary hash:
-SHA256: [hash]
-
-[AI queries threat intelligence and provides analysis]
-```
-
-### Advanced Features
-
-#### Beam Mode (Multi-Model Analysis)
-Compare responses from multiple models simultaneously:
-1. Enable Beam mode in big-AGI
-2. Select 2-4 models (e.g., Llama, Mistral, CodeLlama)
-3. Ask security question
-4. Get diverse perspectives and identify best answer
-
-#### Custom Personas
-Create specialized security personas:
-```yaml
-# configs/big-agi/personas/red-team.yaml
-name: "Red Team Operator"
-role: "Offensive security expert"
-instructions: |
-  You are an experienced penetration tester and red team operator.
-  Focus on:
-  - Identifying attack vectors
-  - Exploitation techniques
-  - Stealth and evasion
-  - Post-exploitation strategies
-  Always provide ethical hacking context and authorization requirements.
-```
-
-## Security & Privacy
-
-### Data Protection
-- ✅ All AI processing stays on localhost
-- ✅ No telemetry or analytics sent to external servers
-- ✅ Models run in isolated Docker containers
-- ✅ Network traffic limited to localhost only
-
-### Operational Security
-- 🔒 API keys stored in `.env` (not committed to Git)
-- 🔒 Systemd services run as non-root user
-- 🔒 Docker containers with minimal privileges
-- 🔒 Regular security updates via `./scripts/update-stack.sh`
-
-### Best Practices
-1. **Keep models updated** - Newer models have better security understanding
-2. **Use personas** - Specialized personas give better security guidance
-3. **Validate AI output** - Always verify AI-generated security advice
-4. **Sanitize inputs** - Don't paste actual credentials or sensitive data
-5. **Air-gap if needed** - Disconnect from network for maximum security
-
-## Project Structure
-
-```
-Local-AI-CySec-Workstation/
-├── docs/                      # Documentation
-│   ├── installation.md        # Detailed installation guide
-│   ├── model-comparison.md    # LLM model comparison
-│   ├── security-use-cases.md  # Cybersecurity examples
-│   ├── troubleshooting.md     # Common issues
-│   └── README.md              # Documentation index
-├── configs/                   # Configuration files
-│   ├── localai/               # LocalAI configs
-│   │   └── config.yaml
-│   ├── big-agi/               # big-AGI configs
-│   │   ├── .env.example
-│   │   └── personas/          # Custom personas
-│   ├── systemd/               # Systemd service files
-│   │   ├── localai.service
-│   │   ├── big-agi.service
-│   │   └── chromium-debug.service
-│   └── README.md
-├── scripts/                   # Automation scripts
-│   ├── install-dependencies.sh
-│   ├── download-models.sh
-│   ├── start-stack.sh
-│   ├── stop-stack.sh
-│   ├── update-stack.sh
-│   ├── backup-configs.sh
-│   └── README.md
-├── tools/                     # Security integration tools
-│   ├── ai-vuln-analyzer.py    # AI-powered CVE analysis
-│   ├── ai-log-parser.py       # Intelligent log analysis
-│   ├── ai-code-reviewer.py    # Security code review
-│   └── README.md
-├── examples/                  # Example workflows
-│   ├── vulnerability-analysis.md
-│   ├── malware-analysis.md
-│   ├── log-analysis.md
-│   └── code-review.md
-├── .gitignore
-├── README.md                  # This file
-└── LICENSE
-```
-
-## Performance Optimization
-
-### GPU Acceleration
-```bash
-# Verify ROCm installation
-rocm-smi
-
-# Check GPU utilization during inference
-watch -n 1 rocm-smi
-
-# Optimize LocalAI for your GPU
-vim configs/localai/config.yaml
-# Set: gpu_layers: 35 (adjust based on VRAM)
-```
-
-### Model Selection
-| Model | Size | VRAM | Use Case | Speed |
-|-------|------|------|----------|-------|
-| Llama-3.1-8B | 8B | 6GB | General security queries | Fast |
-| Llama-3.1-70B | 70B | 48GB | Complex analysis | Slow |
-| CodeLlama-13B | 13B | 10GB | Code security review | Medium |
-| Mistral-7B | 7B | 5GB | Quick responses | Very Fast |
-| DeepSeek-Coder-6.7B | 6.7B | 5GB | Code analysis | Fast |
-
-### Inference Optimization
-- **Context Length:** Reduce for faster responses (2048 vs 4096 tokens)
-- **Temperature:** Lower (0.3-0.5) for consistent security analysis
-- **Quantization:** Use Q4 or Q5 models for speed (vs Q8 for accuracy)
-
-## Troubleshooting
-
-### LocalAI Not Starting
-```bash
-# Check Docker logs
-docker logs local-ai
-
-# Verify GPU passthrough
-docker run --rm --device=/dev/kfd --device=/dev/dri rocm/rocm-terminal rocm-smi
-
-# Check port availability
-ss -tlnp | grep 8080
-```
-
-### big-AGI Connection Issues
-```bash
-# Test LocalAI API
-curl http://localhost:8080/v1/models
-
-# Check big-AGI logs
-journalctl -u big-agi.service -f
-
-# Verify environment variables
-cat /run/media/ssjlox/gamer/localAI/big-AGI/.env
-```
-
-### GPU Not Detected
-```bash
-# Install ROCm drivers
-./scripts/install-rocm.sh
-
-# Verify installation
-rocm-smi
-/opt/rocm/bin/rocminfo
-
-# Check kernel modules
-lsmod | grep amdgpu
-```
-
-See [docs/troubleshooting.md](docs/troubleshooting.md) for more solutions.
-
-## Roadmap
-
-### Current Features ✅
-- [x] LocalAI GPU-accelerated inference
-- [x] big-AGI web interface
-- [x] Systemd service management
-- [x] Chromium headless browser integration
-- [x] Multi-model support
-
-### Planned Features 📋
-- [ ] Automated model download and management
-- [ ] Security-focused model fine-tuning
-- [ ] Integration with SIEM tools (Wazuh, Splunk)
-- [ ] Automated threat intelligence gathering
-- [ ] Custom security personas library
-- [ ] RAG (Retrieval-Augmented Generation) for security docs
-- [ ] API for security tool integration
-- [ ] Grafana dashboards for AI metrics
-- [ ] Automated vulnerability scanning with AI triage
-
-### Future Enhancements 🚀
-- [ ] Kubernetes deployment for scaling
-- [ ] Multi-GPU support
-- [ ] Custom security model training pipeline
-- [ ] Integration with Metasploit/Burp Suite
-- [ ] AI-powered penetration testing assistant
-- [ ] Automated security report generation
-
-## Contributing
-
-This is a personal cybersecurity workstation project, but contributions are welcome:
-
-1. Fork the repository
-2. Create a feature branch
-3. Submit a pull request with detailed description
-4. Follow existing code and documentation standards
-
-## Resources
-
-### LocalAI Documentation
-- [LocalAI Official Docs](https://localai.io/)
-- [Model Gallery](https://localai.io/models/)
-- [API Reference](https://localai.io/basics/getting_started/)
-
-### big-AGI Documentation
-- [big-AGI GitHub](https://github.com/enricoros/big-AGI)
-- [Configuration Guide](https://github.com/enricoros/big-AGI/blob/main/docs/environment-variables.md)
-- [Deployment Options](https://github.com/enricoros/big-AGI/blob/main/docs/deploy-docker.md)
-
-### AMD ROCm
-- [ROCm Documentation](https://rocm.docs.amd.com/)
-- [Supported GPUs](https://rocm.docs.amd.com/projects/install-on-linux/en/latest/reference/system-requirements.html)
-- [Performance Tuning](https://rocm.docs.amd.com/en/latest/how-to/tuning-guides/index.html)
-
-### Security AI Resources
-- [AI for Cybersecurity - NIST](https://www.nist.gov/ai)
-- [LLMs for Security Research](https://arxiv.org/abs/2307.03170)
-- [Offensive Security with AI](https://www.defcon.org/html/defcon-31/dc-31-speakers.html#AI)
-
-## License
-
-MIT License - See [LICENSE](LICENSE) file
-
-## Contact
-
-For questions about this project or to discuss AI-enhanced security operations:
-- **GitHub:** [@isolomonleecode](https://github.com/isolomonleecode)
-- **Repository:** [Local-AI-CySec-Workstation](https://github.com/isolomonleecode/Local-AI-CySec-Workstation)
+> 100% local AI processing • No cloud dependencies • Fully open source
 
 ---
 
-**Disclaimer:** This workstation is designed for authorized security research, testing, and defensive operations only. Always obtain proper authorization before conducting security assessments. The author is not responsible for misuse of these tools.
+## 🎯 Quick Start
 
-**Built with:** 🔒 Security | 🤖 AI | 🚀 AMD ROCm | 💻 Open Source
+```bash
+# Clone the repository
+git clone https://github.com/isolomonleecode/Local-AI-CySec-Workstation.git
+cd Local-AI-CySec-Workstation
+
+# Configure environment
+cp .env.example .env
+nano .env  # Edit with your settings
+
+# Generate secure API keys
+echo "LITELLM_MASTER_KEY=sk-$(openssl rand -hex 16)" >> .env
+echo "LITELLM_SALT_KEY=sk-salt-$(openssl rand -hex 16)" >> .env
+
+# Start AI services
+docker-compose --profile ai up -d
+```
+
+**Access:**
+- **big-AGI UI:** http://localhost:3000
+- **Open-WebUI:** http://localhost:3001
+- **LiteLLM API:** http://localhost:4000
+- **LocalAI:** http://localhost:8080
+- **n8n Automation:** http://localhost:5678
+
+**📖 Complete deployment guide:** [DOCKER-COMPOSE-GUIDE.md](DOCKER-COMPOSE-GUIDE.md)
+
+**📚 Full documentation and configs** are maintained in a centralized vault (not in this repo).
+
+**Privacy Note:** Configuration files (systemd, LiteLLM, Prometheus, Promtail) have been moved to a private vault to protect environment-specific data.
+
+---
+
+## 🔥 Features
+
+### 🤖 **Local AI Processing**
+- **Privacy-First:** All AI processing on-premises
+- **GPU-Accelerated:** AMD ROCm/HIP or NVIDIA CUDA for fast inference
+- **Multi-Model:** Run multiple LLMs simultaneously
+- **No API Costs:** Unlimited usage, zero per-token fees
+
+### 🔐 **Security-Focused**
+- **CVE Analysis:** AI-powered vulnerability assessment
+- **Malware Analysis:** Safe local code analysis
+- **Log Analysis:** Intelligent threat detection
+- **Code Review:** Automated security audits
+- **Incident Response:** Real-time alert automation
+
+### 🛠️ **Integrated Stack**
+- **LiteLLM:** Unified API for multiple AI models
+- **LocalAI:** OpenAI-compatible local inference
+- **big-AGI:** Advanced web interface
+- **n8n:** Security automation workflows
+- **Wazuh:** SIEM integration (optional)
+- **Grafana:** Real-time dashboards (optional)
+
+---
+
+## 🏗️ Architecture
+
+```
+┌─────────────────────────────────────────────────────┐
+│         Local AI CySec Workstation                   │
+├─────────────────────────────────────────────────────┤
+│                                                      │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐         │
+│  │ big-AGI  │─▶│ LiteLLM  │─▶│ LocalAI  │         │
+│  │  (UI)    │  │ (Proxy)  │  │ (Engine) │         │
+│  │  :3000   │  │  :4000   │  │  :8080   │         │
+│  └──────────┘  └──────────┘  └────┬─────┘         │
+│                                    │                │
+│                                    ▼                │
+│                        ┌────────────────────┐      │
+│                        │   AMD/NVIDIA GPU   │      │
+│                        │   AI Acceleration  │      │
+│                        └────────────────────┘      │
+│                                                     │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐        │
+│  │   n8n    │─▶│  Wazuh   │─▶│ Grafana  │        │
+│  │ :5678    │  │ (SIEM)   │  │  :3001   │        │
+│  └──────────┘  └──────────┘  └──────────┘        │
+└─────────────────────────────────────────────────────┘
+```
+
+---
+
+## 📦 What's Included
+
+### AI Models (Pre-configured)
+- **qwen3-30b** - Complex analysis & reasoning
+- **llama-3.1-8b** - Coding & general chat
+- **mistral-7b** - Fast responses
+- **qwen2.5-7b** - Function calling
+- **whisper-1** - Voice transcription
+
+### Security Automation (n8n workflows)
+- **Automated CVE Scanning** - Daily vulnerability monitoring
+- **Incident Response** - Real-time alert triage
+- **Threat Hunting** - AI-powered log analysis
+- **Security Dashboards** - Wazuh-Grafana integration
+- **Claude Code Integration** - AI coding assistant via Telegram/Slack/Discord
+
+---
+
+## 🚀 Deployment
+
+**Primary Method:** Docker Compose (recommended)
+
+### Prerequisites
+
+- **OS:** Linux (Arch, Ubuntu, Fedora)
+- **GPU:** AMD with ROCm support (or NVIDIA with CUDA)
+- **RAM:** 16GB minimum, 32GB recommended
+- **Storage:** 100GB+ free space
+- **Docker:** Docker Engine 20.10+ & Docker Compose V2
+
+### Docker Compose Deployment (Recommended)
+
+```bash
+# 1. Clone and setup
+git clone https://github.com/isolomonleecode/Local-AI-CySec-Workstation.git
+cd Local-AI-CySec-Workstation
+cp .env.example .env
+
+# 2. Generate secure keys
+echo "LITELLM_MASTER_KEY=sk-$(openssl rand -hex 16)" >> .env
+echo "LITELLM_SALT_KEY=sk-salt-$(openssl rand -hex 16)" >> .env
+echo "POSTGRES_PASSWORD=$(openssl rand -base64 32)" >> .env
+
+# 3. Start AI services
+docker-compose --profile ai up -d
+
+# 4. Verify
+curl http://localhost:4000/health
+curl http://localhost:8080/readyz
+```
+
+**Deployment Options:**
+```bash
+# AI only (core services)
+docker-compose --profile ai up -d
+
+# AI + monitoring
+docker-compose --profile ai --profile monitoring up -d
+
+# AI + monitoring + SAML lab
+docker-compose --profile ai --profile monitoring --profile saml up -d
+```
+
+**📖 Complete guide:** [DOCKER-COMPOSE-GUIDE.md](DOCKER-COMPOSE-GUIDE.md)
+
+### Alternative: Systemd Services (Optional)
+
+For advanced users who prefer systemd:
+1. See templates in `configs/systemd/`
+2. Run `./scripts/configure-services.sh`
+3. Follow `configs/systemd/README.md`
+
+**Note:** Docker Compose is recommended for easier management and portability.
+
+---
+
+## 📖 Documentation
+
+**Documentation is centralized** in a private vault (keeping the GitHub repo clean and portable).
+
+### Key Guides
+- **Quick Start Guide** - Get up and running fast
+- **Installation Guide** - Complete setup instructions
+- **Connection Guide** - big-AGI ↔ LiteLLM setup
+- **n8n Integration** - Security automation workflows
+- **Docker Network Fix** - Container networking solutions
+- **Troubleshooting** - Common issues and solutions
+
+### n8n Workflows
+
+Ready-to-import security automation in [`n8n-workflows/`](n8n-workflows/):
+
+#### Security Workflows
+1. **vulnerability-scanner.json** - Daily CVE monitoring with AI analysis
+2. **incident-response.json** - Real-time alert triage & automated response
+3. **wazuh-grafana-integration.json** - Security metrics & dashboards
+4. **wazuh-n8n-integration.xml** - Wazuh webhook configuration
+
+#### Claude Code Integration
+Located in `n8n-workflows/claude-code-integration/`:
+1. **01-telegram-claude-code.json** - Telegram bot for coding assistance
+2. **02-slack-claude-code.json** - Slack integration
+3. **03-discord-claude-code.json** - Discord bot
+
+#### Prompt Enhancement System
+Located in `n8n-workflows/prompt-enhancement-system/`:
+- Security-focused AI prompt templates (threat modeling, IR, compliance, pentesting)
+- Three workflow variants (full pipeline, fast track, deep analysis)
+
+---
+
+## 🔧 Configuration
+
+### Default Ports
+
+| Service | Port | Purpose |
+|---------|------|---------|
+| big-AGI | 3000 | Web UI |
+| Open-WebUI | 3001 | Alternative Web UI |
+| LiteLLM | 4000 | AI API Proxy |
+| n8n | 5678 | Workflow Automation |
+| LocalAI | 8080 | Inference Engine |
+| Prometheus | 9090 | Metrics |
+
+### API Keys
+
+All API keys should be generated securely using:
+
+```bash
+# LiteLLM Master Key
+echo "LITELLM_MASTER_KEY=sk-$(openssl rand -hex 16)" >> .env
+
+# LiteLLM Salt Key
+echo "LITELLM_SALT_KEY=sk-salt-$(openssl rand -hex 16)" >> .env
+```
+
+**Never commit API keys to version control!**
+
+---
+
+## 🎓 Use Cases
+
+### Security Professionals
+- ✅ CVE Analysis & vulnerability research
+- ✅ Malware analysis (safe local environment)
+- ✅ Incident response automation
+- ✅ Threat hunting & log analysis
+- ✅ Security report generation
+
+### Developers
+- ✅ Security code review
+- ✅ Penetration testing assistance
+- ✅ Security architecture review
+- ✅ Compliance guidance (GDPR/HIPAA/PCI-DSS)
+
+### SOC Teams
+- ✅ Alert triage automation
+- ✅ Threat intelligence enrichment
+- ✅ Incident documentation
+- ✅ Playbook execution
+
+---
+
+## 🛡️ Security & Privacy
+
+- ✅ **100% Local:** No data sent to cloud
+- ✅ **No Telemetry:** Zero external tracking
+- ✅ **GDPR Compliant:** Data sovereignty
+- ✅ **Air-Gap Ready:** Can run fully offline
+- ✅ **Encrypted Storage:** All data encrypted at rest
+- ✅ **Audit Logs:** Complete activity logging
+
+---
+
+## 🐛 Troubleshooting
+
+### GPU not detected
+```bash
+# Check GPU visibility
+docker exec local-ai rocm-smi    # For AMD
+docker exec local-ai nvidia-smi  # For NVIDIA
+
+# Verify container GPU access
+docker exec local-ai env | grep HSA_OVERRIDE_GFX_VERSION
+```
+
+### Can't connect to LiteLLM
+```bash
+# Test LiteLLM health
+curl http://localhost:4000/health
+
+# Check if running
+docker ps | grep litellm
+```
+
+### big-AGI connection refused
+
+**Problem:** Using `localhost:4000` fails from inside Docker network
+
+**Solution:** Use container name instead:
+```
+http://ai-litellm-1:4000
+```
+
+See documentation: `DOCKER_NETWORK_FIX.md`
+
+### n8n can't reach LocalAI
+
+**Problem:** LocalAI not on same Docker network
+
+**Solution:** Use host IP address:
+```
+http://192.168.0.x:8080  # Replace x with your host IP
+```
+
+---
+
+## 📜 License
+
+MIT License - See [LICENSE](LICENSE)
+
+---
+
+## 🗂️ Project Structure
+
+```
+Local-AI-CySec-Workstation/
+├── docker-compose.yml           # Primary deployment method
+├── .env.example                 # Environment template
+├── scripts/                     # Setup & management scripts
+│   └── configure-services.sh
+├── n8n-workflows/               # Security automation workflows
+│   ├── claude-code-integration/ # AI coding assistant bots
+│   ├── prompt-enhancement-system/  # Security prompt templates
+│   ├── vulnerability-scanner.json
+│   ├── incident-response.json
+│   └── wazuh-grafana-integration.json
+├── configs/                     # Example configurations
+│   └── systemd/                 # Systemd service templates
+├── DOCKER-COMPOSE-GUIDE.md      # Deployment guide
+├── .gitignore
+├── README.md
+└── LICENSE
+```
+
+**Note:** Detailed configuration files and documentation are maintained in a private vault for security and portability.
+
+---
+
+## 🚦 Getting Help
+
+### Common Issues
+1. **GPU not detected** - Check ROCm/CUDA installation
+2. **Port conflicts** - Change ports in `.env` file
+3. **Network issues** - See `DOCKER_NETWORK_FIX.md`
+4. **Permission errors** - Check Docker user groups
+
+### Resources
+- **Documentation Vault** - Complete guides and configurations
+- **n8n Workflows** - Pre-built automation templates
+- **Issue Tracker** - Report bugs and request features
+
+---
+
+## 🙏 Acknowledgments
+
+Built with:
+- [LocalAI](https://localai.io/) - Local inference engine
+- [LiteLLM](https://github.com/BerriAI/litellm) - Unified AI API
+- [big-AGI](https://github.com/enricoros/big-AGI) - Advanced UI
+- [n8n](https://n8n.io/) - Workflow automation
+- [Wazuh](https://wazuh.com/) - Security monitoring
+- [Grafana](https://grafana.com/) - Visualization platform
+
+---
+
+**Last Updated:** December 13, 2025

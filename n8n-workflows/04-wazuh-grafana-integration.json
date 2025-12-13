@@ -1,0 +1,276 @@
+{
+  "name": "Wazuh → Grafana Security Dashboard Integration",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 15
+            }
+          ]
+        }
+      },
+      "name": "Every 15 Minutes",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "url": "=https://192.168.1.100:55000/security/events",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "method": "GET",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "q",
+              "value": "=timestamp>=now-15m"
+            },
+            {
+              "name": "limit",
+              "value": "1000"
+            },
+            {
+              "name": "sort",
+              "value": "-timestamp"
+            }
+          ]
+        },
+        "options": {
+          "allowUnauthorizedCerts": true
+        }
+      },
+      "name": "Fetch Wazuh Events",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Aggregate Wazuh events for Grafana\nconst items = $input.all();\nconst events = items[0]?.json?.data?.affected_items || [];\n\n// Initialize counters\nconst stats = {\n  total_events: events.length,\n  critical: 0,\n  high: 0,\n  medium: 0,\n  low: 0,\n  by_agent: {},\n  by_rule: {},\n  top_rules: [],\n  threat_score: 0\n};\n\n// Process each event\nfor (const event of events) {\n  const level = event.rule?.level || 0;\n  const agentName = event.agent?.name || 'unknown';\n  const ruleId = event.rule?.id || 'unknown';\n  const ruleDesc = event.rule?.description || 'Unknown';\n  \n  // Categorize by severity\n  if (level >= 12) stats.critical++;\n  else if (level >= 7) stats.high++;\n  else if (level >= 4) stats.medium++;\n  else stats.low++;\n  \n  // Count by agent\n  stats.by_agent[agentName] = (stats.by_agent[agentName] || 0) + 1;\n  \n  // Count by rule\n  if (!stats.by_rule[ruleId]) {\n    stats.by_rule[ruleId] = { count: 0, description: ruleDesc, level: level };\n  }\n  stats.by_rule[ruleId].count++;\n}\n\n// Calculate threat score (0-100)\nstats.threat_score = Math.min(100, \n  (stats.critical * 10) + (stats.high * 5) + (stats.medium * 2) + stats.low\n);\n\n// Get top 10 rules\nstats.top_rules = Object.entries(stats.by_rule)\n  .sort((a, b) => b[1].count - a[1].count)\n  .slice(0, 10)\n  .map(([id, data]) => ({ rule_id: id, ...data }));\n\nreturn [{ json: stats }];"
+      },
+      "name": "Aggregate Stats",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [650, 300]
+    },
+    {
+      "parameters": {
+        "url": "=http://192.168.1.100:3001/api/datasources/proxy/1/api/v1/write",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "method": "POST",
+        "sendBody": true,
+        "bodyContentType": "raw",
+        "rawContentType": "text/plain",
+        "body": "=# Wazuh Security Metrics\nwazuh_events_total {{ $json.total_events }} {{ Date.now() }}\nwazuh_events_critical {{ $json.critical }} {{ Date.now() }}\nwazuh_events_high {{ $json.high }} {{ Date.now() }}\nwazuh_events_medium {{ $json.medium }} {{ Date.now() }}\nwazuh_events_low {{ $json.low }} {{ Date.now() }}\nwazuh_threat_score {{ $json.threat_score }} {{ Date.now() }}",
+        "options": {}
+      },
+      "name": "Push to Prometheus/Grafana",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [850, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{ $json.threat_score }}",
+              "operation": "largerEqual",
+              "value2": 70
+            }
+          ]
+        }
+      },
+      "name": "High Threat Score?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [1050, 300]
+    },
+    {
+      "parameters": {
+        "url": "=http://192.168.1.100:4000/v1/chat/completions",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "openAiApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"qwen3-30b\",\n  \"messages\": [\n    {\n      \"role\": \"system\",\n      \"content\": \"You are a security analyst. Analyze security event patterns and provide: 1) Potential threats identified, 2) Risk assessment, 3) Recommended actions.\"\n    },\n    {\n      \"role\": \"user\",\n      \"content\": \"Security Event Summary (last 15 min):\\n\\nTotal Events: {{ $json.total_events }}\\nCritical: {{ $json.critical }}\\nHigh: {{ $json.high }}\\nMedium: {{ $json.medium }}\\nLow: {{ $json.low }}\\nThreat Score: {{ $json.threat_score }}/100\\n\\nTop Rules:\\n{{ JSON.stringify($json.top_rules, null, 2) }}\\n\\nWhat security concerns should we investigate?\"\n    }\n  ],\n  \"max_tokens\": 1200,\n  \"temperature\": 0.2\n}",
+        "options": {}
+      },
+      "name": "AI Threat Analysis",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [1250, 200]
+    },
+    {
+      "parameters": {
+        "url": "=http://192.168.1.100:3001/api/annotations",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"tags\": [\"wazuh\", \"threat-alert\", \"high-score\"],\n  \"text\": \"High threat activity detected - Score: {{ $json.threat_score }}/100. AI Analysis: {{ $json.ai_analysis?.substring(0, 200) }}...\",\n  \"time\": {{ Date.now() }}\n}",
+        "options": {}
+      },
+      "name": "Create Grafana Alert Annotation",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [1450, 200]
+    },
+    {
+      "parameters": {
+        "channel": "#security-ops",
+        "text": "=⚠️ **High Threat Activity Detected**\\n\\n**Threat Score:** {{ $json.threat_score }}/100\\n**Period:** Last 15 minutes\\n\\n**Event Breakdown:**\\n• Critical: {{ $json.critical }}\\n• High: {{ $json.high }}\\n• Medium: {{ $json.medium }}\\n• Low: {{ $json.low }}\\n\\n**AI Analysis:**\\n{{ $json.ai_analysis }}\\n\\n**Dashboard:** http://192.168.1.100:3001/d/wazuh-security",
+        "attachments": []
+      },
+      "name": "Alert Slack",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 1,
+      "position": [1650, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Generate comprehensive dashboard data\nconst stats = $input.first().json;\n\nconst dashboardData = {\n  timestamp: new Date().toISOString(),\n  period: '15min',\n  metrics: {\n    total_events: stats.total_events,\n    severity: {\n      critical: stats.critical,\n      high: stats.high,\n      medium: stats.medium,\n      low: stats.low\n    },\n    threat_score: stats.threat_score,\n    top_agents: Object.entries(stats.by_agent)\n      .sort((a, b) => b[1] - a[1])\n      .slice(0, 5)\n      .map(([agent, count]) => ({ agent, count })),\n    top_rules: stats.top_rules.slice(0, 5)\n  },\n  status: stats.threat_score >= 70 ? 'critical' : stats.threat_score >= 40 ? 'warning' : 'normal'\n};\n\nreturn [{ json: dashboardData }];"
+      },
+      "name": "Format Dashboard Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [850, 500]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=http://192.168.1.100:3001/api/dashboards/db",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"dashboard\": {\n    \"id\": null,\n    \"uid\": \"wazuh-security\",\n    \"title\": \"Wazuh Security Overview\",\n    \"tags\": [\"wazuh\", \"security\", \"automated\"],\n    \"timezone\": \"browser\",\n    \"schemaVersion\": 16,\n    \"version\": 0,\n    \"refresh\": \"30s\"\n  },\n  \"folderId\": 0,\n  \"overwrite\": true\n}",
+        "options": {}
+      },
+      "name": "Update Grafana Dashboard",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [1050, 500]
+    },
+    {
+      "parameters": {
+        "content": "## Wazuh → Grafana Integration\\n\\n**Purpose:** Real-time security dashboard updates\\n\\n**Flow:**\\n1. Fetch Wazuh events (every 15 min)\\n2. Aggregate statistics\\n3. Push metrics to Prometheus/Grafana\\n4. Check threat score\\n5. If high (≥70):\\n   - AI threat analysis\\n   - Create Grafana annotation\\n   - Alert Slack\\n6. Update Grafana dashboard\\n\\n**Metrics Tracked:**\\n- Event counts by severity\\n- Threat score (0-100)\\n- Top agents generating alerts\\n- Top triggered rules",
+        "height": 400,
+        "width": 300
+      },
+      "name": "Sticky Note3",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [240, 460]
+    }
+  ],
+  "connections": {
+    "Every 15 Minutes": {
+      "main": [
+        [
+          {
+            "node": "Fetch Wazuh Events",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Wazuh Events": {
+      "main": [
+        [
+          {
+            "node": "Aggregate Stats",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate Stats": {
+      "main": [
+        [
+          {
+            "node": "Push to Prometheus/Grafana",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Format Dashboard Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Push to Prometheus/Grafana": {
+      "main": [
+        [
+          {
+            "node": "High Threat Score?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "High Threat Score?": {
+      "main": [
+        [
+          {
+            "node": "AI Threat Analysis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Threat Analysis": {
+      "main": [
+        [
+          {
+            "node": "Create Grafana Alert Annotation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Grafana Alert Annotation": {
+      "main": [
+        [
+          {
+            "node": "Alert Slack",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Dashboard Data": {
+      "main": [
+        [
+          {
+            "node": "Update Grafana Dashboard",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": ["wazuh", "grafana", "security", "monitoring"],
+  "triggerCount": 1,
+  "updatedAt": "2025-12-05T00:00:00.000Z",
+  "versionId": "1.0"
+}

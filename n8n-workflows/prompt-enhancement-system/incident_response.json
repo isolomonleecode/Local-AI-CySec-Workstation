@@ -1,0 +1,228 @@
+{
+  "domain": "incident_response",
+  "description": "Security incident response and digital forensics library",
+  "expertise_injections": [
+    "Follow NIST SP 800-61 incident response lifecycle: Preparation → Detection & Analysis → Containment, Eradication & Recovery → Post-Incident Activity",
+    "Apply SANS Incident Handler's process: Preparation → Identification → Containment → Eradication → Recovery → Lessons Learned",
+    "Maintain chain of custody for all forensic evidence with proper documentation",
+    "Implement evidence preservation before analysis (forensic imaging, memory dumps, network captures)",
+    "Use standardized severity classifications (SEV1/P1 through SEV4/P4)",
+    "Coordinate with legal, communications, and executive teams for major incidents",
+    "Document all actions with timestamps, personnel involved, and rationale",
+    "Apply proper containment strategies: short-term isolation, long-term remediation",
+    "Collect volatile data first (memory, active connections) before non-volatile (disk, logs)",
+    "Use MITRE ATT&CK TTPs (Tactics, Techniques, Procedures) to map adversary behavior",
+    "Implement communication protocols for internal teams, executives, customers, regulators",
+    "Preserve business continuity during incident response activities",
+    "Create detailed incident timelines with all observables and indicators of compromise (IOCs)"
+  ],
+  "required_fields": [
+    "incident_type",
+    "severity_level",
+    "affected_systems",
+    "detection_method",
+    "incident_timeline",
+    "business_impact",
+    "response_team_roles",
+    "communication_requirements",
+    "regulatory_obligations",
+    "evidence_preservation_needs"
+  ],
+  "compliance_frameworks": [
+    "NIST SP 800-61 (Computer Security Incident Handling Guide)",
+    "ISO/IEC 27035 (Information Security Incident Management)",
+    "SANS Incident Response Process",
+    "PCI DSS Requirement 12.10 (Incident Response Plan)",
+    "GDPR Article 33 (Breach Notification - 72 hour requirement)",
+    "HIPAA Breach Notification Rule",
+    "SOC 2 Type II (Incident Response Controls)",
+    "NIST Cybersecurity Framework (Respond function)"
+  ],
+  "standard_outputs": [
+    "Incident response playbook with step-by-step procedures",
+    "Severity classification matrix with escalation triggers",
+    "Communication templates (internal, executive, customer, regulatory)",
+    "Evidence collection checklist with chain of custody forms",
+    "Incident timeline with all events, actions, and decisions",
+    "Root cause analysis report with contributing factors",
+    "Remediation plan with short-term and long-term actions",
+    "Lessons learned document with process improvements",
+    "IOC (Indicators of Compromise) list in STIX/TAXII format",
+    "Post-incident metrics (MTTD, MTTR, containment time)"
+  ],
+  "incident_severity_matrix": {
+    "SEV1_CRITICAL": {
+      "criteria": "Active breach with data exfiltration, ransomware encryption, or complete service outage",
+      "response_time": "Immediate (< 15 minutes)",
+      "escalation": "CISO, CTO, CEO, Legal, PR",
+      "notification": "Executive team, board of directors, regulatory authorities if applicable"
+    },
+    "SEV2_HIGH": {
+      "criteria": "Confirmed compromise without active exfiltration, major service degradation, or privileged account compromise",
+      "response_time": "< 1 hour",
+      "escalation": "Security leadership, IT management, affected business unit",
+      "notification": "Executive summary within 4 hours"
+    },
+    "SEV3_MEDIUM": {
+      "criteria": "Suspicious activity requiring investigation, minor service impact, or isolated system compromise",
+      "response_time": "< 4 hours",
+      "escalation": "Security operations team, system owners",
+      "notification": "Daily status updates to management"
+    },
+    "SEV4_LOW": {
+      "criteria": "Policy violations, failed attack attempts, or informational security events",
+      "response_time": "< 24 hours",
+      "escalation": "Security analyst, ticket-based workflow",
+      "notification": "Weekly summary reports"
+    }
+  },
+  "incident_playbook_templates": [
+    {
+      "incident_type": "Ransomware Attack",
+      "detection_indicators": ["File encryption activity", "Ransom note files", "Suspicious PowerShell/WMI execution", "Disabled backups"],
+      "immediate_actions": [
+        "Isolate affected systems from network (disconnect, do not power off)",
+        "Identify ransomware variant (ransom note, file extensions, behavioral analysis)",
+        "Assess encryption scope (which systems/data affected)",
+        "Verify backup integrity and availability",
+        "Notify executive team and activate incident response team"
+      ],
+      "containment": [
+        "Block C2 domains/IPs at firewall and DNS",
+        "Disable compromised accounts in Active Directory",
+        "Segment network to prevent lateral spread",
+        "Preserve forensic evidence (memory dumps, disk images, logs)"
+      ],
+      "eradication": [
+        "Identify and remove persistence mechanisms (scheduled tasks, registry keys, services)",
+        "Rebuild compromised systems from known-good images",
+        "Reset all credentials for affected environment",
+        "Patch vulnerabilities exploited in initial access"
+      ],
+      "recovery": [
+        "Restore from clean backups after verifying no malware present",
+        "Monitor restored systems for re-infection indicators",
+        "Implement enhanced monitoring for similar TTPs",
+        "Gradual return to production with validation at each step"
+      ],
+      "do_not_pay_ransom": "Paying ransom does not guarantee data recovery, funds criminal activity, and may violate OFAC sanctions"
+    },
+    {
+      "incident_type": "Data Breach (Unauthorized Access)",
+      "detection_indicators": ["Unusual database queries", "Large data exports", "Failed login attempts followed by success", "Access from anomalous locations"],
+      "immediate_actions": [
+        "Identify compromised accounts and disable access",
+        "Determine scope of data accessed (what, when, how much)",
+        "Preserve audit logs and access records",
+        "Assess regulatory notification requirements (GDPR 72 hours, state laws)",
+        "Engage legal counsel and forensics team"
+      ],
+      "containment": [
+        "Revoke API keys, tokens, and session credentials",
+        "Enable additional authentication factors",
+        "Restrict database access to whitelist of IPs",
+        "Monitor for continued exfiltration attempts"
+      ],
+      "eradication": [
+        "Close attack vector (patch vulnerability, update configurations)",
+        "Remove attacker persistence (backdoors, web shells, scheduled tasks)",
+        "Credential rotation for all potentially exposed accounts"
+      ],
+      "recovery": [
+        "Implement data loss prevention (DLP) controls",
+        "Enhanced monitoring on data repositories",
+        "User notification per regulatory requirements",
+        "Credit monitoring services for affected individuals if PII compromised"
+      ],
+      "regulatory_deadlines": {
+        "GDPR": "72 hours to regulatory authority, without undue delay to individuals",
+        "CCPA": "No specific deadline but must be 'without unreasonable delay'",
+        "HIPAA": "60 days for breaches affecting 500+ individuals",
+        "PCI_DSS": "Immediate notification to card brands and acquiring bank"
+      }
+    },
+    {
+      "incident_type": "Phishing Campaign",
+      "detection_indicators": ["User reports suspicious emails", "Multiple recipients of similar email", "Malicious attachments/links", "Credential harvesting attempts"],
+      "immediate_actions": [
+        "Obtain email samples with full headers",
+        "Identify all recipients in organization",
+        "Block sender addresses and domains",
+        "Check for compromised credentials (attempted logins from phishing site)"
+      ],
+      "containment": [
+        "Quarantine/delete emails from all mailboxes",
+        "Block malicious URLs at web gateway and DNS",
+        "Force password resets for users who clicked links",
+        "Monitor for follow-on attacks (BEC, malware deployment)"
+      ],
+      "eradication": [
+        "Remove malware if attachments were executed",
+        "Update email filtering rules",
+        "Add IOCs to threat intelligence feeds"
+      ],
+      "recovery": [
+        "User awareness training on phishing indicators",
+        "Phishing simulation campaign to reinforce training",
+        "Implement DMARC/DKIM/SPF to prevent spoofing"
+      ]
+    }
+  ],
+  "forensic_collection_order": [
+    {
+      "priority": 1,
+      "data_type": "Volatile Memory (RAM)",
+      "rationale": "Lost on power-off, contains active processes, decryption keys, network connections",
+      "tools": ["FTK Imager", "WinPmem", "LiME (Linux)", "Volatility for analysis"]
+    },
+    {
+      "priority": 2,
+      "data_type": "Network Traffic Captures",
+      "rationale": "Real-time data, shows active C2 communication, lateral movement",
+      "tools": ["tcpdump", "Wireshark", "NetworkMiner", "Zeek/Suricata logs"]
+    },
+    {
+      "priority": 3,
+      "data_type": "Running Processes and Services",
+      "rationale": "Active malware, persistence mechanisms, suspicious connections",
+      "tools": ["Process Hacker", "Sysinternals Suite", "ps/top/lsof on Linux"]
+    },
+    {
+      "priority": 4,
+      "data_type": "System Logs",
+      "rationale": "Event timelines, authentication records, application errors",
+      "tools": ["Windows Event Viewer", "syslog", "application logs", "SIEM exports"]
+    },
+    {
+      "priority": 5,
+      "data_type": "Disk Images",
+      "rationale": "Complete filesystem, deleted files, timeline analysis",
+      "tools": ["dd", "FTK Imager", "EnCase", "X-Ways Forensics"]
+    }
+  ],
+  "communication_templates": {
+    "executive_summary": "Concise overview (1 page): What happened, current status, business impact, estimated resolution, actions taken",
+    "technical_team": "Detailed technical analysis: IOCs, TTPs, affected systems, remediation steps, root cause",
+    "customer_notification": "Transparent but measured: What data affected, what we're doing, what customers should do, support contact",
+    "regulatory_filing": "Compliance-focused: Timeline, scope, notification count, remediation, preventive measures per regulation requirements"
+  },
+  "integration_guidance": {
+    "stage_1_detection": [
+      "Keywords: 'incident response', 'security incident', 'breach', 'compromise', 'intrusion', 'forensics'",
+      "Phrases: 'handle incident', 'respond to attack', 'data breach', 'ransomware', 'playbook', 'containment'"
+    ],
+    "stage_5_injection": "When incident_response domain detected, inject expertise_injections and severity matrix into system prompt. Include relevant playbook templates based on incident type mentioned. Ensure output follows NIST lifecycle phases and includes communication plan."
+  },
+  "quality_criteria": [
+    "Follows industry-standard incident response lifecycle (NIST or SANS)",
+    "Severity level clearly defined with escalation procedures",
+    "Evidence preservation steps included with chain of custody considerations",
+    "Communication plan addresses all stakeholders (technical, executive, customers, regulators)",
+    "Timeline documented with specific timestamps and actions",
+    "Regulatory notification requirements identified with deadlines",
+    "Containment strategy balances business continuity with security",
+    "Root cause analysis included, not just symptom treatment",
+    "Lessons learned section with specific process improvements",
+    "Metrics defined for response effectiveness (MTTD, MTTR, containment time)"
+  ]
+}

@@ -1,0 +1,361 @@
+# Local AI CySec Workstation - Comprehensive Stack
+# Includes: AI services, SAML lab, monitoring
+# Usage:
+#   Full stack:    docker-compose up -d
+#   AI only:       docker-compose --profile ai up -d
+#   + SAML lab:    docker-compose --profile ai --profile saml up -d
+#   + Monitoring:  docker-compose --profile ai --profile monitoring up -d
+
+services:
+  # ============================================================================
+  # AI SERVICES
+  # ============================================================================
+
+  # LocalAI - Primary LLM backend with GPU support
+  local-ai:
+    image: localai/localai:latest-gpu-hipblas
+    container_name: local-ai
+    profiles: ["ai"]
+    ports:
+      - "8080:8080"
+    volumes:
+      - localai_models:/models
+      - localai_backends:/backends
+    networks:
+      - ai-network
+    restart: unless-stopped
+    devices:
+      - /dev/kfd
+      - /dev/dri
+    group_add:
+      - video
+      - render
+    environment:
+      - HSA_OVERRIDE_GFX_VERSION=10.3.0
+      - DEBUG=${DEBUG:-false}
+      - REBUILD=${REBUILD:-false}
+      - CONTEXT_SIZE=${CONTEXT_SIZE:-4096}
+      - THREADS=${THREADS:-8}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/readyz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  # PostgreSQL - Database for LiteLLM
+  litellm-db:
+    image: postgres:16
+    container_name: litellm_db
+    profiles: ["ai"]
+    restart: always
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-litellm}
+      POSTGRES_USER: ${POSTGRES_USER:-llmproxy}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - ai-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -d $${POSTGRES_DB} -U $${POSTGRES_USER}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # LiteLLM - Unified API gateway for multiple LLM providers
+  litellm:
+    image: ghcr.io/berriai/litellm:main-latest
+    container_name: litellm
+    profiles: ["ai"]
+    volumes:
+      - ./configs/litellm/config.yaml:/app/config.yaml
+    command:
+      - "--config=/app/config.yaml"
+    ports:
+      - "${LITELLM_PORT:-4000}:4000"
+    environment:
+      DATABASE_URL: "postgresql://${POSTGRES_USER:-llmproxy}:${POSTGRES_PASSWORD:-changeme}@litellm-db:5432/${POSTGRES_DB:-litellm}"
+      STORE_MODEL_IN_DB: "True"
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:-sk-1234}
+      LITELLM_SALT_KEY: ${LITELLM_SALT_KEY:-sk-salt-5678}
+    env_file:
+      - .env
+    depends_on:
+      litellm-db:
+        condition: service_healthy
+    networks:
+      - ai-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 http://localhost:4000/health/liveliness || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # big-AGI - Primary UI for multi-model interaction
+  big-agi:
+    image: ghcr.io/enricoros/big-agi:latest
+    container_name: big-agi
+    profiles: ["ai"]
+    ports:
+      - "${BIG_AGI_PORT:-3000}:3000"
+    environment:
+      - OPENAI_API_BASE=http://litellm:4000/v1
+      - BACKEND_API_BASE_URL_LOCALAI=http://local-ai:8080/v1
+      - BACKEND_API_KEY_LOCALAI=not-needed
+      - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY:-sk-1234}
+      - NODE_ENV=production
+      - NEXT_TELEMETRY_DISABLED=1
+    env_file:
+      - .env
+    networks:
+      - ai-network
+    depends_on:
+      - litellm
+      - local-ai
+    restart: unless-stopped
+
+  # Open-WebUI - Specialized for RAG and document analysis
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:ollama
+    container_name: open-webui
+    profiles: ["ai"]
+    ports:
+      - "${OPEN_WEBUI_PORT:-3001}:8080"
+    environment:
+      - OPENAI_API_BASE_URL=http://litellm:4000/v1
+      - OPENAI_API_KEY=${LITELLM_MASTER_KEY:-sk-1234}
+      - ENABLE_RAG=true
+      - ENABLE_OLLAMA_API=false
+    volumes:
+      - open_webui_data:/app/backend/data
+    networks:
+      - ai-network
+    depends_on:
+      - litellm
+    restart: unless-stopped
+
+  # n8n - Workflow automation for AI and security tasks
+  n8n:
+    image: n8nio/n8n:latest
+    container_name: n8n
+    profiles: ["ai"]
+    ports:
+      - "${N8N_PORT:-5678}:5678"
+    environment:
+      - N8N_HOST=0.0.0.0
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=http
+      - NODE_ENV=production
+      - WEBHOOK_URL=http://192.168.0.52:5678/
+      - GENERIC_TIMEZONE=America/Chicago
+    volumes:
+      - n8n_data:/home/node/.n8n
+    networks:
+      - ai-network
+    depends_on:
+      - local-ai
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 http://localhost:5678/healthz -O /dev/null || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+  # ============================================================================
+  # MONITORING SERVICES (Optional)
+  # ============================================================================
+
+  # Prometheus - Metrics collection
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    profiles: ["monitoring"]
+    volumes:
+      - prometheus_data:/prometheus
+      - ./configs/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=15d"
+    networks:
+      - ai-network
+    restart: always
+
+  # Node Exporter - System metrics
+  node-exporter:
+    image: quay.io/prometheus/node-exporter:latest
+    container_name: node-exporter
+    profiles: ["monitoring"]
+    command:
+      - '--path.rootfs=/host'
+    pid: host
+    restart: unless-stopped
+    volumes:
+      - '/:/host:ro,rslave'
+    networks:
+      - ai-network
+
+  # Promtail - Log collection
+  promtail:
+    image: grafana/promtail:latest
+    container_name: promtail
+    profiles: ["monitoring"]
+    volumes:
+      - ./configs/promtail/config.yml:/etc/promtail/config.yml:ro
+      - /var/log:/var/log:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+    ports:
+      - "${PROMTAIL_PORT:-9080}:9080"
+    command: -config.file=/etc/promtail/config.yml
+    networks:
+      - ai-network
+    restart: unless-stopped
+
+  # ============================================================================
+  # SAML LAB (Optional - for security testing)
+  # ============================================================================
+
+  # Keycloak Identity Provider
+  keycloak:
+    image: quay.io/keycloak/keycloak:latest
+    container_name: saml-idp-keycloak
+    profiles: ["saml"]
+    environment:
+      KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN:-admin}
+      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin123}
+      KC_HOSTNAME: idp.homelab.local
+      KC_HOSTNAME_PORT: 8180
+      KC_HTTP_ENABLED: true
+      KC_HTTP_PORT: 8080
+      KC_HOSTNAME_STRICT: false
+      KC_HOSTNAME_STRICT_HTTPS: false
+    ports:
+      - "8180:8080"
+    command: start-dev
+    networks:
+      - saml-network
+    volumes:
+      - keycloak_data:/opt/keycloak/data
+    restart: unless-stopped
+
+  # SimpleSAMLphp - Test Service Provider
+  simplesamlphp:
+    image: venatorfox/simplesamlphp
+    container_name: saml-sp-simple
+    profiles: ["saml"]
+    environment:
+      SIMPLESAMLPHP_SP_ENTITY_ID: http://sp1.homelab.local:8081
+      SIMPLESAMLPHP_SP_ASSERTION_CONSUMER_SERVICE: http://sp1.homelab.local:8081/module.php/saml/sp/saml2-acs.php/default-sp
+      SIMPLESAMLPHP_SP_SINGLE_LOGOUT_SERVICE: http://sp1.homelab.local:8081/module.php/saml/sp/saml2-logout.php/default-sp
+      SIMPLESAMLPHP_ADMIN_PASSWORD: ${SIMPLESAMLPHP_ADMIN_PASSWORD:-admin123}
+      SIMPLESAMLPHP_BASEURLPATH: http://localhost:8081/simplesaml/
+      CONFIG_BASEURLPATH: simplesaml/
+    ports:
+      - "8081:80"
+    networks:
+      - saml-network
+    volumes:
+      - simplesaml_config:/var/simplesamlphp/config
+      - simplesaml_metadata:/var/simplesamlphp/metadata
+    restart: unless-stopped
+
+  # NextCloud - SAML Service Provider Example
+  nextcloud:
+    image: nextcloud:latest
+    container_name: saml-sp-nextcloud
+    profiles: ["saml"]
+    environment:
+      MYSQL_HOST: nextcloud-db
+      MYSQL_DATABASE: nextcloud
+      MYSQL_USER: nextcloud
+      MYSQL_PASSWORD: ${NEXTCLOUD_DB_PASSWORD:-nextcloud123}
+      NEXTCLOUD_ADMIN_USER: ${NEXTCLOUD_ADMIN_USER:-admin}
+      NEXTCLOUD_ADMIN_PASSWORD: ${NEXTCLOUD_ADMIN_PASSWORD:-admin123}
+      NEXTCLOUD_TRUSTED_DOMAINS: nextcloud.homelab.local localhost
+    ports:
+      - "8082:80"
+    networks:
+      - saml-network
+    depends_on:
+      - nextcloud-db
+    volumes:
+      - nextcloud_data:/var/www/html
+    restart: unless-stopped
+
+  nextcloud-db:
+    image: mariadb:10.6
+    container_name: saml-nextcloud-db
+    profiles: ["saml"]
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootpass123}
+      MYSQL_DATABASE: nextcloud
+      MYSQL_USER: nextcloud
+      MYSQL_PASSWORD: ${NEXTCLOUD_DB_PASSWORD:-nextcloud123}
+    networks:
+      - saml-network
+    volumes:
+      - nextcloud_db:/var/lib/mysql
+    restart: unless-stopped
+
+  # SFTP Integration Server (for testing file transfers)
+  sftp-server:
+    image: atmoz/sftp:latest
+    container_name: sftp-integration-server
+    profiles: ["saml"]
+    ports:
+      - "2222:22"
+    command: ${SFTP_USER:-testuser}:${SFTP_PASSWORD:-testpass}:1001
+    volumes:
+      - sftp_data:/home/${SFTP_USER:-testuser}/upload
+    restart: unless-stopped
+    networks:
+      - saml-network
+
+# ============================================================================
+# NETWORKS
+# ============================================================================
+networks:
+  ai-network:
+    driver: bridge
+    name: ai-network
+    external: true
+  saml-network:
+    driver: bridge
+    name: saml-network
+
+# ============================================================================
+# VOLUMES
+# ============================================================================
+volumes:
+  # AI Services
+  postgres_data:
+    name: litellm_postgres_data
+  open_webui_data:
+    driver: local
+  localai_models:
+    driver: local
+  localai_backends:
+    driver: local
+  n8n_data:
+    driver: local
+    name: n8n_workstation_data
+
+  # Monitoring
+  prometheus_data:
+    driver: local
+
+  # SAML Lab
+  keycloak_data:
+  simplesaml_config:
+  simplesaml_metadata:
+  nextcloud_data:
+  nextcloud_db:
+  sftp_data:

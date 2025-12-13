@@ -1,0 +1,113 @@
+{
+  "domain": "threat_modeling",
+  "description": "Threat modeling and security architecture analysis library",
+  "expertise_injections": [
+    "Apply STRIDE methodology (Spoofing, Tampering, Repudiation, Information Disclosure, Denial of Service, Elevation of Privilege)",
+    "Reference MITRE ATT&CK framework for realistic threat actor behaviors and techniques",
+    "Consider attack surface analysis across network, application, and data layers",
+    "Identify trust boundaries and data flow crossing security contexts",
+    "Evaluate threat likelihood and impact using risk matrices (High/Medium/Low)",
+    "Map threats to security controls (preventive, detective, corrective)",
+    "Include threat scenarios with attack chains and kill chain stages",
+    "Consider insider threats, supply chain risks, and third-party dependencies",
+    "Apply defense-in-depth principles across multiple security layers",
+    "Document threat assumptions and environmental constraints",
+    "Prioritize threats based on exploitability, business impact, and existing controls",
+    "Include compensating controls when primary mitigations are not feasible"
+  ],
+  "required_fields": [
+    "system_description",
+    "trust_boundaries",
+    "data_flows",
+    "assets_to_protect",
+    "threat_actors",
+    "existing_security_controls",
+    "risk_tolerance",
+    "compliance_requirements"
+  ],
+  "compliance_frameworks": [
+    "NIST SP 800-30 (Risk Assessment)",
+    "ISO/IEC 27005 (Information Security Risk Management)",
+    "OWASP Threat Modeling",
+    "NIST Cybersecurity Framework (Identify function)",
+    "ISO/IEC 15408 (Common Criteria)",
+    "SABSA (Sherwood Applied Business Security Architecture)"
+  ],
+  "standard_outputs": [
+    "Threat model diagram (data flow diagram with trust boundaries)",
+    "STRIDE threat enumeration table",
+    "Risk assessment matrix with likelihood and impact ratings",
+    "Prioritized threat list with recommended mitigations",
+    "Security control mapping (threats → controls → residual risk)",
+    "Attack tree diagrams for high-priority threats",
+    "Threat scenarios with attack narratives",
+    "Mitigation roadmap with implementation priorities"
+  ],
+  "methodology_templates": {
+    "stride_analysis": {
+      "spoofing": "Can an attacker impersonate a legitimate user, system, or data source?",
+      "tampering": "Can an attacker modify data in transit, at rest, or during processing?",
+      "repudiation": "Can an attacker deny performing an action without audit trail?",
+      "information_disclosure": "Can an attacker access sensitive data they should not see?",
+      "denial_of_service": "Can an attacker disrupt system availability or performance?",
+      "elevation_of_privilege": "Can an attacker gain unauthorized access or permissions?"
+    },
+    "risk_rating": {
+      "critical": "Exploitable with high business impact, immediate action required",
+      "high": "Likely exploitable with significant impact, prioritize remediation",
+      "medium": "Moderate likelihood or impact, remediate in planned cycle",
+      "low": "Low likelihood or minimal impact, monitor and accept risk"
+    },
+    "threat_actor_profiles": [
+      "Nation-state APT (advanced persistent threat with significant resources)",
+      "Organized cybercrime (financially motivated, ransomware/fraud focus)",
+      "Hacktivist (ideologically motivated, publicity-seeking attacks)",
+      "Insider threat (malicious or negligent employees/contractors)",
+      "Script kiddie (low-skill opportunistic attacker using public tools)",
+      "Competitor (corporate espionage, intellectual property theft)"
+    ]
+  },
+  "common_threat_scenarios": [
+    {
+      "scenario": "SQL Injection Attack",
+      "stride_category": "Tampering, Information Disclosure",
+      "attack_chain": "Reconnaissance → Inject malicious SQL → Extract database contents → Exfiltrate sensitive data",
+      "mitigations": ["Parameterized queries", "Input validation", "Least privilege database accounts", "WAF with SQL injection rules"]
+    },
+    {
+      "scenario": "Credential Stuffing",
+      "stride_category": "Spoofing, Elevation of Privilege",
+      "attack_chain": "Obtain leaked credentials → Automate login attempts → Compromise accounts → Lateral movement",
+      "mitigations": ["Multi-factor authentication", "Rate limiting", "CAPTCHA", "Credential monitoring", "Password policies"]
+    },
+    {
+      "scenario": "Ransomware Deployment",
+      "stride_category": "Denial of Service, Tampering",
+      "attack_chain": "Phishing → Initial access → Privilege escalation → Disable backups → Encrypt files → Ransom demand",
+      "mitigations": ["Email filtering", "EDR/XDR", "Offline backups", "Network segmentation", "Incident response plan"]
+    },
+    {
+      "scenario": "Supply Chain Compromise",
+      "stride_category": "Tampering, Elevation of Privilege",
+      "attack_chain": "Compromise dependency → Inject malicious code → Distribute to downstream users → Execute payload",
+      "mitigations": ["Software composition analysis", "Dependency pinning", "Code signing", "Vendor security assessments"]
+    }
+  ],
+  "integration_guidance": {
+    "stage_1_detection": [
+      "Keywords: 'threat model', 'security risk', 'attack surface', 'threat assessment', 'security architecture'",
+      "Phrases: 'identify threats', 'risk analysis', 'security evaluation', 'attack scenarios'"
+    ],
+    "stage_5_injection": "When threat_modeling domain detected, inject expertise_injections into system prompt. Include relevant methodology_templates and common_threat_scenarios as examples. Ensure output includes STRIDE analysis and risk prioritization."
+  },
+  "quality_criteria": [
+    "All STRIDE categories evaluated for each trust boundary crossing",
+    "Threat likelihood and impact ratings clearly justified",
+    "Mitigations mapped to specific threats (not generic security advice)",
+    "Residual risk after mitigation explicitly stated",
+    "Threat model diagram included (or clear instructions to create one)",
+    "Compliance framework requirements addressed",
+    "Threat scenarios written from attacker perspective with realistic techniques",
+    "Prioritization based on both technical exploitability and business impact"
+  ]
+}

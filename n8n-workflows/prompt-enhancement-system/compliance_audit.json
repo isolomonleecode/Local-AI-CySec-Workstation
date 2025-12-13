@@ -1,0 +1,327 @@
+{
+  "domain": "compliance_audit",
+  "description": "Security compliance and regulatory audit library",
+  "expertise_injections": [
+    "Map security controls to specific compliance framework requirements (SOC 2, ISO 27001, PCI DSS, HIPAA, GDPR, etc.)",
+    "Use evidence-based approach: every control claim must have verifiable evidence",
+    "Apply sampling methodology for large populations (statistically valid sample sizes)",
+    "Document control maturity using standardized scales (Initial, Repeatable, Defined, Managed, Optimized)",
+    "Identify gaps between current state and required compliance posture",
+    "Provide remediation roadmaps with effort estimates and compliance deadlines",
+    "Consider both technical controls and administrative/physical controls",
+    "Assess not just control existence, but control effectiveness and consistency",
+    "Document exceptions and compensating controls with business justification",
+    "Prepare for external auditor review with organized evidence repositories",
+    "Use risk-based approach to prioritize compliance efforts",
+    "Maintain continuous compliance monitoring, not point-in-time assessments only"
+  ],
+  "required_fields": [
+    "compliance_framework",
+    "scope_of_audit",
+    "audit_period",
+    "control_domains",
+    "evidence_requirements",
+    "gap_analysis_needed",
+    "remediation_timeline",
+    "auditor_type",
+    "previous_audit_findings",
+    "business_context"
+  ],
+  "compliance_frameworks": [
+    "SOC 2 Type II (Trust Services Criteria: Security, Availability, Processing Integrity, Confidentiality, Privacy)",
+    "ISO/IEC 27001:2022 (Information Security Management System with 93 controls in Annex A)",
+    "PCI DSS 4.0 (Payment Card Industry Data Security Standard - 12 requirements, 300+ controls)",
+    "HIPAA Security Rule (Administrative, Physical, Technical Safeguards for PHI)",
+    "GDPR (General Data Protection Regulation - lawfulness, transparency, data subject rights)",
+    "NIST SP 800-53 Rev. 5 (Security and Privacy Controls for Information Systems)",
+    "NIST Cybersecurity Framework 2.0 (Identify, Protect, Detect, Respond, Recover, Govern)",
+    "FedRAMP (Federal Risk and Authorization Management Program)",
+    "CMMC 2.0 (Cybersecurity Maturity Model Certification for DoD contractors)",
+    "CIS Controls v8 (Center for Internet Security - 18 critical security controls)"
+  ],
+  "standard_outputs": [
+    "Compliance gap analysis matrix (control → current state → target state → gap → remediation)",
+    "Evidence repository organized by control domain",
+    "Control testing workpapers with sampling methodology and results",
+    "Executive readiness assessment with traffic-light status (Red/Yellow/Green)",
+    "Remediation roadmap with effort, timeline, and responsible parties",
+    "Policy and procedure documentation aligned to framework requirements",
+    "Audit response templates for common auditor questions",
+    "Continuous compliance monitoring dashboard metrics",
+    "Risk register for compliance exceptions and accepted risks"
+  ],
+  "framework_details": {
+    "SOC_2_Type_II": {
+      "trust_service_criteria": {
+        "CC_Common_Criteria": "Foundational: Governance, Risk Assessment, Monitoring",
+        "A_Availability": "System available for operation as committed",
+        "C_Confidentiality": "Information designated confidential is protected",
+        "P_Processing_Integrity": "System processing is complete, valid, accurate, timely, authorized",
+        "PI_Privacy": "Personal information collected, used, retained, disclosed, disposed per commitments"
+      },
+      "audit_period": "Typically 12 months of control operation evidence",
+      "key_deliverables": [
+        "SOC 2 Type II report with auditor opinion",
+        "System description document",
+        "Control matrix with testing results",
+        "Management assertion letter"
+      ],
+      "common_controls": [
+        "CC6.1: Logical access controls restrict access to authorized users",
+        "CC6.6: Vulnerability management process identifies and remediates vulnerabilities",
+        "CC7.2: System monitoring detects anomalies and security incidents",
+        "CC8.1: Change management process controls system changes"
+      ]
+    },
+    "ISO_27001": {
+      "structure": "Clauses 4-10 (requirements), Annex A (93 controls across 4 domains)",
+      "domains": [
+        "Organizational Controls (37 controls): Policies, asset management, HR security",
+        "People Controls (8 controls): Screening, awareness training, disciplinary process",
+        "Physical Controls (14 controls): Physical security, equipment security, secure disposal",
+        "Technological Controls (34 controls): Access control, cryptography, network security, incident management"
+      ],
+      "certification_process": "Stage 1 (documentation review) → Stage 2 (implementation audit) → Surveillance audits (annual) → Recertification (every 3 years)",
+      "key_documents": [
+        "Information Security Policy (mandatory)",
+        "Statement of Applicability (SoA) - which Annex A controls apply",
+        "Risk Treatment Plan",
+        "Internal audit reports",
+        "Management review meeting minutes"
+      ]
+    },
+    "PCI_DSS_4": {
+      "12_requirements": [
+        "1. Install and maintain network security controls",
+        "2. Apply secure configurations to all system components",
+        "3. Protect stored account data",
+        "4. Protect cardholder data with strong cryptography during transmission",
+        "5. Protect all systems and networks from malicious software",
+        "6. Develop and maintain secure systems and software",
+        "7. Restrict access to system components and cardholder data by business need to know",
+        "8. Identify users and authenticate access to system components",
+        "9. Restrict physical access to cardholder data",
+        "10. Log and monitor all access to system components and cardholder data",
+        "11. Test security of systems and networks regularly",
+        "12. Support information security with organizational policies and programs"
+      ],
+      "validation_levels": {
+        "Level_1": "6M+ transactions/year - Annual Report on Compliance (ROC) by QSA",
+        "Level_2": "1M-6M transactions/year - Annual Self-Assessment Questionnaire (SAQ) or ROC",
+        "Level_3": "20K-1M e-commerce transactions/year - Annual SAQ",
+        "Level_4": "<20K e-commerce or <1M total - Annual SAQ"
+      },
+      "key_changes_v4": [
+        "Customized approach option (not just prescriptive controls)",
+        "Multi-factor authentication for all access to CDE",
+        "Targeted risk analysis for critical controls",
+        "Enhanced encryption and key management requirements"
+      ]
+    },
+    "HIPAA_Security_Rule": {
+      "safeguard_categories": {
+        "Administrative": [
+          "Security Management Process (risk analysis, risk management, sanctions, review)",
+          "Assigned Security Responsibility",
+          "Workforce Security (authorization, clearance, termination)",
+          "Information Access Management",
+          "Security Awareness and Training",
+          "Security Incident Procedures",
+          "Contingency Plan (backup, disaster recovery, emergency mode, testing)",
+          "Business Associate Agreements"
+        ],
+        "Physical": [
+          "Facility Access Controls",
+          "Workstation Use and Security",
+          "Device and Media Controls (disposal, reuse, accountability, backup)"
+        ],
+        "Technical": [
+          "Access Control (unique user ID, emergency access, automatic logoff, encryption)",
+          "Audit Controls (logging and monitoring)",
+          "Integrity Controls (data integrity validation)",
+          "Transmission Security (encryption of ePHI in transit)"
+        ]
+      },
+      "implementation_specifications": {
+        "required": "Must implement (e.g., unique user IDs, automatic logoff, encryption of ePHI in transit)",
+        "addressable": "Assess reasonableness and implement if reasonable, or document equivalent alternative or acceptance of risk"
+      },
+      "breach_notification": "Notify affected individuals within 60 days if breach affects 500+ individuals, notify HHS and media"
+    },
+    "GDPR": {
+      "principles": [
+        "Lawfulness, fairness, transparency",
+        "Purpose limitation (collect for specific purposes only)",
+        "Data minimization (adequate, relevant, limited)",
+        "Accuracy (kept up to date)",
+        "Storage limitation (no longer than necessary)",
+        "Integrity and confidentiality (security)",
+        "Accountability (demonstrate compliance)"
+      ],
+      "data_subject_rights": [
+        "Right to be informed (privacy notices)",
+        "Right of access (data subject access requests within 30 days)",
+        "Right to rectification (correct inaccurate data)",
+        "Right to erasure ('right to be forgotten')",
+        "Right to restrict processing",
+        "Right to data portability",
+        "Right to object (to processing)",
+        "Rights related to automated decision making and profiling"
+      ],
+      "key_requirements": [
+        "Lawful basis for processing (consent, contract, legal obligation, vital interests, public task, legitimate interests)",
+        "Data Protection Impact Assessment (DPIA) for high-risk processing",
+        "Data Protection Officer (DPO) if required",
+        "Breach notification within 72 hours to supervisory authority",
+        "Privacy by Design and by Default",
+        "Records of Processing Activities (ROPA)"
+      ],
+      "penalties": "Up to €20M or 4% of global annual revenue, whichever is higher"
+    }
+  },
+  "control_maturity_model": {
+    "Level_1_Initial": {
+      "description": "Ad-hoc, reactive, undocumented processes",
+      "characteristics": ["No formal policies", "Inconsistent execution", "No metrics"],
+      "audit_finding": "Significant deficiency or material weakness"
+    },
+    "Level_2_Repeatable": {
+      "description": "Some processes documented and followed, but not standardized",
+      "characteristics": ["Basic documentation", "Dependent on individuals", "Inconsistent across teams"],
+      "audit_finding": "Control deficiency requiring remediation"
+    },
+    "Level_3_Defined": {
+      "description": "Documented, standardized, communicated organization-wide",
+      "characteristics": ["Formal policies and procedures", "Training provided", "Consistent execution"],
+      "audit_finding": "Control operating effectively (baseline for compliance)"
+    },
+    "Level_4_Managed": {
+      "description": "Measured, monitored, metrics-driven",
+      "characteristics": ["KPIs and dashboards", "Regular reviews", "Data-driven improvements"],
+      "audit_finding": "Control operating effectively with strong evidence"
+    },
+    "Level_5_Optimized": {
+      "description": "Continuous improvement, automation, proactive",
+      "characteristics": ["Automated controls", "Predictive analytics", "Industry-leading practices"],
+      "audit_finding": "Exemplary control environment"
+    }
+  },
+  "audit_evidence_framework": {
+    "evidence_types": [
+      {
+        "type": "Policies and Procedures",
+        "examples": "Information Security Policy, Acceptable Use Policy, Incident Response Plan",
+        "strength": "Medium (establishes intent, but not proof of execution)"
+      },
+      {
+        "type": "System Configurations",
+        "examples": "Firewall rulesets, access control lists, encryption settings",
+        "strength": "High (technical controls with timestamped evidence)"
+      },
+      {
+        "type": "Logs and Monitoring Records",
+        "examples": "Access logs, change logs, security event logs, vulnerability scan results",
+        "strength": "High (objective, timestamped, difficult to manipulate)"
+      },
+      {
+        "type": "Screenshots and System Outputs",
+        "examples": "User permission reports, backup verification, patching status",
+        "strength": "Medium-High (point-in-time evidence, should be timestamped)"
+      },
+      {
+        "type": "Training Records",
+        "examples": "Security awareness training completion, phishing simulation results",
+        "strength": "Medium (demonstrates awareness efforts)"
+      },
+      {
+        "type": "Attestations and Surveys",
+        "examples": "Vendor questionnaires, employee acknowledgments, management assertions",
+        "strength": "Low-Medium (self-reported, requires corroboration)"
+      },
+      {
+        "type": "Third-Party Reports",
+        "examples": "Vendor SOC 2 reports, penetration test reports, external audit findings",
+        "strength": "High (independent validation)"
+      }
+    ],
+    "evidence_organization": {
+      "structure": "Organize by control domain → control ID → evidence type → audit period",
+      "naming_convention": "[Framework]_[ControlID]_[EvidenceType]_[Date].pdf",
+      "example": "SOC2_CC6.1_AccessReviewReport_2024Q4.pdf",
+      "retention": "Retain evidence for audit period + 7 years (or per regulatory requirement)"
+    }
+  },
+  "gap_remediation_framework": {
+    "gap_analysis_template": {
+      "control_id": "Framework-specific control identifier",
+      "control_description": "What the control requires",
+      "current_state": "How it is currently implemented (or not)",
+      "target_state": "Compliant implementation",
+      "gap": "Specific deficiencies",
+      "risk_if_not_remediated": "Business and compliance impact",
+      "remediation_steps": "Specific actions to close gap",
+      "responsible_party": "Owner of remediation",
+      "effort_estimate": "Hours/days, complexity (Low/Medium/High)",
+      "target_completion_date": "Based on audit timeline",
+      "status": "Not Started / In Progress / Complete"
+    },
+    "prioritization_criteria": [
+      "Regulatory deadline (e.g., PCI DSS annual validation, GDPR enforcement)",
+      "Risk level (high-risk gaps before low-risk)",
+      "Effort required (quick wins first to demonstrate progress)",
+      "Dependencies (foundational controls before dependent controls)",
+      "Auditor feedback (previously identified findings get priority)"
+    ]
+  },
+  "common_audit_questions": {
+    "access_control": [
+      "How do you ensure users have appropriate access based on job role?",
+      "What is your user provisioning and deprovisioning process?",
+      "How frequently are access reviews performed?",
+      "Do you enforce multi-factor authentication? For which systems?"
+    ],
+    "change_management": [
+      "Describe your change approval process.",
+      "How do you test changes before production deployment?",
+      "What is your rollback procedure?",
+      "Can you provide evidence of recent changes with approvals?"
+    ],
+    "vulnerability_management": [
+      "How frequently do you scan for vulnerabilities?",
+      "What is your remediation SLA for critical/high vulnerabilities?",
+      "Show evidence of recent vulnerability scan and remediation tracking.",
+      "How do you handle vulnerabilities in third-party software?"
+    ],
+    "incident_response": [
+      "Describe your incident detection and response process.",
+      "Provide evidence of recent security incidents and how they were handled.",
+      "How often do you test your incident response plan?",
+      "What are your breach notification procedures?"
+    ],
+    "backup_and_recovery": [
+      "What is your backup frequency and retention?",
+      "How do you verify backup integrity?",
+      "When was the last disaster recovery test performed?",
+      "What is your RTO/RPO for critical systems?"
+    ]
+  },
+  "integration_guidance": {
+    "stage_1_detection": [
+      "Keywords: 'compliance', 'audit', 'SOC 2', 'ISO 27001', 'PCI DSS', 'HIPAA', 'GDPR', 'regulatory', 'certification'",
+      "Phrases: 'compliance gap', 'audit preparation', 'control framework', 'evidence collection', 'compliance readiness'"
+    ],
+    "stage_5_injection": "When compliance_audit domain detected, inject expertise_injections and relevant framework details into system prompt. Include control maturity model and evidence framework. Ensure output maps to specific compliance framework requirements with evidence types and gap analysis."
+  },
+  "quality_criteria": [
+    "Specific compliance framework identified with version (e.g., PCI DSS 4.0, ISO 27001:2022)",
+    "Controls mapped to specific framework requirements, not generic security practices",
+    "Evidence types specified for each control with collection methodology",
+    "Gap analysis includes current state, target state, and specific remediation steps",
+    "Control maturity assessed using standardized model",
+    "Sampling methodology documented for population-based testing",
+    "Remediation roadmap prioritized by regulatory deadline and risk",
+    "Audit artifacts organized in auditor-friendly structure",
+    "Compensating controls documented with business justification when applicable",
+    "Continuous monitoring approach defined, not just point-in-time assessment"
+  ]
+}

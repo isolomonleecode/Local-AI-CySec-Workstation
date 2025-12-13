@@ -1,0 +1,184 @@
+<!-- Wazuh Integration for n8n Automation -->
+<!-- Add this to /var/ossec/etc/ossec.conf on your main PC -->
+
+<ossec_config>
+  <!-- n8n Webhook Integration for Real-time Incident Response -->
+  <integration>
+    <name>custom-webhook</name>
+    <!-- Replace with your Raspberry Pi IP address and n8n port -->
+    <hook_url>http://192.168.1.50:5678/webhook/wazuh-alerts</hook_url>
+    <!-- Only send alerts of level 7 and above (High/Critical) -->
+    <level>7</level>
+    <!-- Send alerts in JSON format -->
+    <alert_format>json</alert_format>
+    <!-- Optional: Filter by specific rules -->
+    <!-- <rule_id>5710,5712,5720</rule_id> -->
+    <!-- Optional: Send all alerts (remove level filter) -->
+    <!-- <level>3</level> -->
+  </integration>
+
+  <!-- Alternative: Integration for Critical Alerts Only -->
+  <integration>
+    <name>custom-webhook-critical</name>
+    <hook_url>http://192.168.1.50:5678/webhook/wazuh-critical</hook_url>
+    <level>12</level>
+    <alert_format>json</alert_format>
+  </integration>
+
+  <!-- Optional: Integration for Specific Alert Groups -->
+  <integration>
+    <name>custom-webhook-authentication</name>
+    <hook_url>http://192.168.1.50:5678/webhook/wazuh-auth</hook_url>
+    <group>authentication_failed,authentication_success</group>
+    <alert_format>json</alert_format>
+  </integration>
+
+  <integration>
+    <name>custom-webhook-web-attacks</name>
+    <hook_url>http://192.168.1.50:5678/webhook/wazuh-web</hook_url>
+    <group>web,attack</group>
+    <alert_format>json</alert_format>
+  </integration>
+
+  <!-- Optional: Integration for Specific Agents -->
+  <!-- <integration>
+    <name>custom-webhook-production</name>
+    <hook_url>http://192.168.1.50:5678/webhook/wazuh-production</hook_url>
+    <agent_id>001,002,003</agent_id>
+    <level>5</level>
+    <alert_format>json</alert_format>
+  </integration> -->
+</ossec_config>
+
+<!--
+Configuration Options:
+
+<name>: Identifier for the integration
+<hook_url>: n8n webhook URL (http://RASPBERRY_PI_IP:5678/webhook/WEBHOOK_NAME)
+<level>: Minimum alert level (0-15)
+  - 0-3: Low
+  - 4-6: Medium
+  - 7-11: High
+  - 12-15: Critical
+<alert_format>: json (recommended) or splunk
+<rule_id>: Comma-separated list of specific rule IDs to forward
+<group>: Comma-separated list of rule groups to forward
+<agent_id>: Comma-separated list of specific agents to monitor
+
+Alert Levels Reference:
+- Level 0: Ignored
+- Level 1-2: None (minimal)
+- Level 3: Low
+- Level 4-6: Medium
+- Level 7-9: High (important events)
+- Level 10-11: High (more critical)
+- Level 12: Critical (attack detected)
+- Level 13-15: Critical (severe attacks)
+
+Common Rule Groups:
+- authentication_failed
+- authentication_success
+- attack
+- web
+- ids
+- firewall
+- malware
+- rootcheck
+- syscheck (file integrity)
+- vulnerability-detector
+
+Installation Steps:
+
+1. Backup current config:
+   sudo cp /var/ossec/etc/ossec.conf /var/ossec/etc/ossec.conf.backup
+
+2. Edit Wazuh config:
+   sudo nano /var/ossec/etc/ossec.conf
+
+3. Add integration section inside <ossec_config> tags
+
+4. Update Raspberry Pi IP address in hook_url
+
+5. Test configuration:
+   sudo /var/ossec/bin/wazuh-control configcheck
+
+6. Restart Wazuh:
+   sudo systemctl restart wazuh-manager
+
+7. Monitor integration logs:
+   sudo tail -f /var/ossec/logs/integrations.log
+
+8. Test webhook:
+   # Trigger a test alert
+   sudo /var/ossec/bin/agent_control -i 000 -u
+
+   # Or send test JSON
+   curl -X POST http://RASPBERRY_PI_IP:5678/webhook/wazuh-alerts \
+     -H "Content-Type: application/json" \
+     -d '{
+       "rule": {
+         "id": "5710",
+         "level": 10,
+         "description": "Test alert"
+       },
+       "agent": {"name": "test"},
+       "data": {"srcip": "192.168.1.100"}
+     }'
+
+Troubleshooting:
+
+- If webhook fails, check /var/ossec/logs/integrations.log
+- Verify Raspberry Pi is reachable: ping RASPBERRY_PI_IP
+- Test webhook manually: curl -X POST http://...
+- Ensure Wazuh has network access (firewall, SELinux)
+- Check n8n workflow is active
+- Verify webhook URL matches n8n webhook node
+
+Security Recommendations:
+
+1. Use HTTPS if possible (requires SSL cert on n8n)
+2. Consider VPN between Wazuh and n8n
+3. Implement webhook authentication (custom header)
+4. Rate limit integrations to prevent DoS
+5. Monitor integration logs for failures
+6. Encrypt webhook payload if sending sensitive data
+
+Performance Tuning:
+
+- Use <level> to filter alerts (reduce noise)
+- Group similar alerts together
+- Consider batching alerts (custom script)
+- Monitor n8n execution queue
+- Scale n8n horizontally if needed
+
+Example Payload Sent to n8n:
+
+{
+  "id": "1234567890.123456",
+  "timestamp": "2025-12-05T10:30:00.000Z",
+  "rule": {
+    "id": "5710",
+    "level": 10,
+    "description": "Multiple authentication failures.",
+    "groups": ["authentication_failed","syslog"]
+  },
+  "agent": {
+    "id": "001",
+    "name": "server-01",
+    "ip": "192.168.1.100"
+  },
+  "data": {
+    "srcip": "192.168.1.50",
+    "srcport": "12345",
+    "dstip": "192.168.1.100",
+    "dstport": "22"
+  },
+  "full_log": "Dec  5 10:30:00 server-01 sshd[1234]: Failed password for admin from 192.168.1.50 port 12345 ssh2",
+  "decoder": {
+    "name": "sshd",
+    "parent": "sshd"
+  }
+}
+
+This payload is processed by n8n workflow 02-incident-response.json
+-->
