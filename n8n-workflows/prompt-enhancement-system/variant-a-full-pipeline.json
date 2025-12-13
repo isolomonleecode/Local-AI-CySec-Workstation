@@ -1,0 +1,287 @@
+{
+  "name": "Prompt Enhancement Pipeline - Full",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "enhance-prompt",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [250, 300],
+      "webhookId": "prompt-enhance-webhook"
+    },
+    {
+      "parameters": {
+        "url": "http://192.168.0.52:4000/v1/chat/completions",
+        "method": "POST",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": []
+        },
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"qwen2.5-7b\",\n  \"messages\": [\n    {\n      \"role\": \"system\",\n      \"content\": \"You are an expert prompt analyst specializing in intent extraction. Analyze the user's prompt and identify:\\n1. Primary intent (what they want to achieve)\\n2. Secondary intents (implicit goals)\\n3. Domain/context clues\\n4. Task complexity level (1-5)\\n5. Ambiguity score (1-5, where 5 = very ambiguous)\\n\\nOutput ONLY valid JSON with this structure:\\n{\\n  \\\"primary_intent\\\": \\\"string\\\",\\n  \\\"secondary_intents\\\": [\\\"string\\\"],\\n  \\\"domain\\\": \\\"string\\\",\\n  \\\"complexity\\\": number,\\n  \\\"ambiguity\\\": number\\n}\"\n    },\n    {\n      \"role\": \"user\",\n      \"content\": \"{{ $json.body.prompt }}\"\n    }\n  ],\n  \"temperature\": 0.3,\n  \"max_tokens\": 500\n}",
+        "options": {}
+      },
+      "id": "stage1-intent-analysis",
+      "name": "Stage 1: Intent Analysis",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "url": "http://192.168.0.52:4000/v1/chat/completions",
+        "method": "POST",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"qwen2.5-7b\",\n  \"messages\": [\n    {\n      \"role\": \"system\",\n      \"content\": \"You are an expert at identifying missing information in prompts. Given a prompt and its intent analysis, identify:\\n1. Missing context that would improve output quality\\n2. Undefined parameters or variables\\n3. Missing constraints or boundaries\\n4. Assumptions that should be made explicit\\n5. Required background information\\n\\nOutput ONLY valid JSON with this structure:\\n{\\n  \\\"missing_context\\\": [\\\"string\\\"],\\n  \\\"undefined_params\\\": [\\\"string\\\"],\\n  \\\"missing_constraints\\\": [\\\"string\\\"],\\n  \\\"implicit_assumptions\\\": [\\\"string\\\"],\\n  \\\"required_background\\\": [\\\"string\\\"]\\n}\"\n    },\n    {\n      \"role\": \"user\",\n      \"content\": \"Original Prompt: {{ $('Webhook Trigger').item.json.body.prompt }}\\n\\nIntent Analysis: {{ $json.body.choices[0].message.content }}\"\n    }\n  ],\n  \"temperature\": 0.3,\n  \"max_tokens\": 600\n}",
+        "options": {}
+      },
+      "id": "stage2-missing-info",
+      "name": "Stage 2: Missing Info Detection",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [650, 300]
+    },
+    {
+      "parameters": {
+        "url": "http://192.168.0.52:4000/v1/chat/completions",
+        "method": "POST",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"qwen2.5-7b\",\n  \"messages\": [\n    {\n      \"role\": \"system\",\n      \"content\": \"You are an expert at defining operational constraints for tasks. Given a prompt and missing information analysis, propose:\\n1. Quality standards (output criteria)\\n2. Scope boundaries (what's in/out of scope)\\n3. Resource constraints (time, compute, data limits)\\n4. Format requirements (structure, length, style)\\n5. Security/ethical guardrails\\n\\nOutput ONLY valid JSON with this structure:\\n{\\n  \\\"quality_standards\\\": [\\\"string\\\"],\\n  \\\"scope_boundaries\\\": {\\\"in_scope\\\": [\\\"string\\\"], \\\"out_of_scope\\\": [\\\"string\\\"]},\\n  \\\"resource_constraints\\\": [\\\"string\\\"],\\n  \\\"format_requirements\\\": [\\\"string\\\"],\\n  \\\"guardrails\\\": [\\\"string\\\"]\\n}\"\n    },\n    {\n      \"role\": \"user\",\n      \"content\": \"Original Prompt: {{ $('Webhook Trigger').item.json.body.prompt }}\\n\\nMissing Info Analysis: {{ $json.body.choices[0].message.content }}\"\n    }\n  ],\n  \"temperature\": 0.4,\n  \"max_tokens\": 700\n}",
+        "options": {}
+      },
+      "id": "stage3-constraints",
+      "name": "Stage 3: Constraint Expansion",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [850, 300]
+    },
+    {
+      "parameters": {
+        "url": "http://192.168.0.52:4000/v1/chat/completions",
+        "method": "POST",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"qwen2.5-7b\",\n  \"messages\": [\n    {\n      \"role\": \"system\",\n      \"content\": \"You are a cybersecurity expert specializing in failure mode analysis. Given a task prompt, identify:\\n1. Common failure modes (what typically goes wrong)\\n2. Edge cases that could break the solution\\n3. Security risks or vulnerabilities\\n4. Data quality issues\\n5. Mitigation strategies for each risk\\n\\nOutput ONLY valid JSON with this structure:\\n{\\n  \\\"failure_modes\\\": [{\\\"mode\\\": \\\"string\\\", \\\"likelihood\\\": \\\"low|medium|high\\\"}],\\n  \\\"edge_cases\\\": [\\\"string\\\"],\\n  \\\"security_risks\\\": [{\\\"risk\\\": \\\"string\\\", \\\"severity\\\": \\\"low|medium|high|critical\\\"}],\\n  \\\"data_quality_issues\\\": [\\\"string\\\"],\\n  \\\"mitigations\\\": [{\\\"for\\\": \\\"string\\\", \\\"strategy\\\": \\\"string\\\"}]\\n}\"\n    },\n    {\n      \"role\": \"user\",\n      \"content\": \"Original Prompt: {{ $('Webhook Trigger').item.json.body.prompt }}\\n\\nConstraints: {{ $json.body.choices[0].message.content }}\"\n    }\n  ],\n  \"temperature\": 0.4,\n  \"max_tokens\": 800\n}",
+        "options": {}
+      },
+      "id": "stage4-risk-analysis",
+      "name": "Stage 4: Risk & Failure Analysis",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1050, 300]
+    },
+    {
+      "parameters": {
+        "url": "http://192.168.0.52:4000/v1/chat/completions",
+        "method": "POST",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"qwen3-30b\",\n  \"messages\": [\n    {\n      \"role\": \"system\",\n      \"content\": \"You are an expert prompt engineer specializing in role and context optimization. Given task analysis, create:\\n1. Optimal role definition for the AI assistant\\n2. Persona characteristics (expertise, perspective, communication style)\\n3. Contextual background information\\n4. Domain-specific knowledge to activate\\n5. Communication framework (how to structure responses)\\n\\nOutput ONLY valid JSON with this structure:\\n{\\n  \\\"role_definition\\\": \\\"string\\\",\\n  \\\"persona\\\": {\\\"expertise\\\": [\\\"string\\\"], \\\"perspective\\\": \\\"string\\\", \\\"style\\\": \\\"string\\\"},\\n  \\\"context_background\\\": \\\"string\\\",\\n  \\\"domain_knowledge\\\": [\\\"string\\\"],\\n  \\\"response_framework\\\": [\\\"string\\\"]\\n}\"\n    },\n    {\n      \"role\": \"user\",\n      \"content\": \"Original Prompt: {{ $('Webhook Trigger').item.json.body.prompt }}\\n\\nIntent: {{ $('Stage 1: Intent Analysis').item.json.body.choices[0].message.content }}\\n\\nConstraints: {{ $('Stage 3: Constraint Expansion').item.json.body.choices[0].message.content }}\\n\\nRisks: {{ $json.body.choices[0].message.content }}\"\n    }\n  ],\n  \"temperature\": 0.6,\n  \"max_tokens\": 1000\n}",
+        "options": {}
+      },
+      "id": "stage5-role-context",
+      "name": "Stage 5: Role + Context Setup",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1250, 300]
+    },
+    {
+      "parameters": {
+        "url": "http://192.168.0.52:4000/v1/chat/completions",
+        "method": "POST",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"qwen3-30b\",\n  \"messages\": [\n    {\n      \"role\": \"system\",\n      \"content\": \"You are a master prompt engineer. Using ALL previous analysis stages, generate 3 distinct enhanced prompt variants:\\n\\n1. **Precision Variant**: Maximum specificity, detailed constraints, structured output requirements\\n2. **Creative Variant**: Exploratory approach, open-ended discovery, innovative solutions\\n3. **Balanced Variant**: Blend of structure and flexibility, practical and actionable\\n\\nEach variant must include:\\n- Complete system prompt (role, context, expertise)\\n- Enhanced user prompt (original intent + missing info + constraints)\\n- Output format specification\\n- Quality criteria\\n\\nOutput ONLY valid JSON with this structure:\\n{\\n  \\\"variants\\\": [\\n    {\\n      \\\"name\\\": \\\"precision|creative|balanced\\\",\\n      \\\"system_prompt\\\": \\\"string\\\",\\n      \\\"user_prompt\\\": \\\"string\\\",\\n      \\\"output_format\\\": \\\"string\\\",\\n      \\\"quality_criteria\\\": [\\\"string\\\"]\\n    }\\n  ]\\n}\"\n    },\n    {\n      \"role\": \"user\",\n      \"content\": \"Original Prompt: {{ $('Webhook Trigger').item.json.body.prompt }}\\n\\n=== ANALYSIS STAGES ===\\n\\nIntent Analysis:\\n{{ $('Stage 1: Intent Analysis').item.json.body.choices[0].message.content }}\\n\\nMissing Information:\\n{{ $('Stage 2: Missing Info Detection').item.json.body.choices[0].message.content }}\\n\\nConstraints:\\n{{ $('Stage 3: Constraint Expansion').item.json.body.choices[0].message.content }}\\n\\nRisk Analysis:\\n{{ $('Stage 4: Risk & Failure Analysis').item.json.body.choices[0].message.content }}\\n\\nRole & Context:\\n{{ $json.body.choices[0].message.content }}\\n\\n=== TASK ===\\nGenerate 3 enhanced prompt variants using this complete analysis.\"\n    }\n  ],\n  \"temperature\": 0.7,\n  \"max_tokens\": 2500\n}",
+        "options": {}
+      },
+      "id": "stage6-variant-generation",
+      "name": "Stage 6: Variant Generation",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1450, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse all stage outputs and compile final structured response\nconst originalPrompt = $input.first().json.body.prompt;\n\n// Parse LLM responses (they're nested in choices[0].message.content)\nconst parseStage = (stageData) => {\n  try {\n    const content = stageData.body.choices[0].message.content;\n    // Try to parse as JSON, fallback to raw string if malformed\n    return JSON.parse(content);\n  } catch (e) {\n    return { raw: content, parse_error: true };\n  }\n};\n\nconst intentAnalysis = parseStage($('Stage 1: Intent Analysis').first().json);\nconst missingInfo = parseStage($('Stage 2: Missing Info Detection').first().json);\nconst constraints = parseStage($('Stage 3: Constraint Expansion').first().json);\nconst riskAnalysis = parseStage($('Stage 4: Risk & Failure Analysis').first().json);\nconst roleContext = parseStage($('Stage 5: Role + Context Setup').first().json);\nconst variants = parseStage($input.first().json);\n\n// Compile final output\nconst output = {\n  metadata: {\n    original_prompt: originalPrompt,\n    pipeline_version: \"1.0.0\",\n    timestamp: new Date().toISOString(),\n    models_used: {\n      analysis: \"qwen2.5-7b\",\n      synthesis: \"qwen3-30b\"\n    }\n  },\n  analysis: {\n    intent: intentAnalysis,\n    missing_information: missingInfo,\n    constraints: constraints,\n    risks: riskAnalysis,\n    role_context: roleContext\n  },\n  enhanced_prompts: variants.variants || variants,\n  usage_instructions: {\n    precision: \"Use for tasks requiring exact specifications, compliance, or audit trails\",\n    creative: \"Use for brainstorming, research, or exploratory analysis\",\n    balanced: \"Use for general-purpose tasks with practical constraints\"\n  }\n};\n\nreturn { json: output };"
+      },
+      "id": "stage7-json-output",
+      "name": "Stage 7: JSON Output Formatting",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1650, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json, null, 2) }}",
+        "options": {}
+      },
+      "id": "webhook-response",
+      "name": "Webhook Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1850, 300]
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {
+      "main": [
+        [
+          {
+            "node": "Stage 1: Intent Analysis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Stage 1: Intent Analysis": {
+      "main": [
+        [
+          {
+            "node": "Stage 2: Missing Info Detection",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Stage 2: Missing Info Detection": {
+      "main": [
+        [
+          {
+            "node": "Stage 3: Constraint Expansion",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Stage 3: Constraint Expansion": {
+      "main": [
+        [
+          {
+            "node": "Stage 4: Risk & Failure Analysis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Stage 4: Risk & Failure Analysis": {
+      "main": [
+        [
+          {
+            "node": "Stage 5: Role + Context Setup",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Stage 5: Role + Context Setup": {
+      "main": [
+        [
+          {
+            "node": "Stage 6: Variant Generation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Stage 6: Variant Generation": {
+      "main": [
+        [
+          {
+            "node": "Stage 7: JSON Output Formatting",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Stage 7: JSON Output Formatting": {
+      "main": [
+        [
+          {
+            "node": "Webhook Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [],
+  "triggerCount": 1,
+  "updatedAt": "2025-12-09T00:00:00.000Z",
+  "versionId": "1"
+}

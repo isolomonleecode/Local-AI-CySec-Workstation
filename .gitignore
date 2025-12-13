@@ -1,3 +1,14 @@
+# Obsidian
+.obsidian/
+*.obsidian
+
+# Documentation (stored in centralized vault)
+docs/
+
+# Configurations with environment-specific data (in vault)
+# Includes systemd services, litellm configs, prometheus, promtail
+configs/
+
 # API Keys and Secrets
 .env
 .env.local
@@ -98,6 +109,12 @@ npm-debug.log*
 yarn-debug.log*
 lerna-debug.log*
 
-# Private notes
+# Private notes (now in centralized Documentation vault)
 NOTES-PRIVATE.md
 TODO-PRIVATE.md
+VERIFICATION_REPORT.md
+*_REPORT.md
+
+# Personal data
+Personal/
+personal/

@@ -1,0 +1,259 @@
+{
+  "domain": "penetration_testing",
+  "description": "Penetration testing and offensive security library",
+  "expertise_injections": [
+    "Follow standardized methodologies: PTES (Penetration Testing Execution Standard), OWASP Testing Guide, or NIST SP 800-115",
+    "Conduct testing within defined scope and rules of engagement - NEVER exceed authorization",
+    "Apply ethical hacking principles: obtain written permission, respect data privacy, minimize business disruption",
+    "Use phased approach: Reconnaissance → Scanning → Enumeration → Exploitation → Post-Exploitation → Reporting",
+    "Prioritize findings by CVSS score and business impact, not just technical severity",
+    "Provide actionable remediation guidance, not just vulnerability lists",
+    "Validate exploitability with proof-of-concept, not theoretical vulnerabilities only",
+    "Document complete attack chains showing real-world impact",
+    "Test both external attack surface and internal lateral movement scenarios",
+    "Include social engineering and physical security when in scope",
+    "Maintain operational security to avoid detection by defensive tools",
+    "Preserve evidence and screenshots for all findings",
+    "Re-test after remediation to verify fixes are effective"
+  ],
+  "required_fields": [
+    "engagement_type",
+    "scope_definition",
+    "rules_of_engagement",
+    "testing_methodology",
+    "timeline_and_duration",
+    "target_systems",
+    "acceptable_risk_level",
+    "reporting_requirements",
+    "remediation_timeline",
+    "authorization_documentation"
+  ],
+  "compliance_frameworks": [
+    "PTES (Penetration Testing Execution Standard)",
+    "OWASP Testing Guide v4",
+    "NIST SP 800-115 (Technical Guide to Information Security Testing)",
+    "PCI DSS Requirement 11.3 (Penetration Testing)",
+    "CREST Penetration Testing Guide",
+    "OSSTMM (Open Source Security Testing Methodology Manual)",
+    "PTES Technical Guidelines",
+    "CEH (Certified Ethical Hacker) methodology"
+  ],
+  "standard_outputs": [
+    "Executive summary with business risk context and key findings",
+    "Technical report with detailed vulnerability descriptions, exploitation steps, and evidence",
+    "Prioritized findings matrix (CVSS score, exploitability, business impact)",
+    "Remediation roadmap with effort estimates and priority ordering",
+    "Attack narrative showing complete exploitation chains",
+    "Proof-of-concept code or screenshots for all findings",
+    "Re-test validation report after remediation",
+    "Metrics: vulnerabilities by severity, coverage percentage, exploitation success rate"
+  ],
+  "engagement_types": {
+    "black_box": {
+      "description": "Zero knowledge testing simulating external attacker",
+      "information_provided": "Only public information (company name, domains)",
+      "advantages": "Realistic external threat simulation, unbiased assessment",
+      "limitations": "Time-consuming reconnaissance, may miss internal vulnerabilities",
+      "typical_duration": "2-4 weeks"
+    },
+    "gray_box": {
+      "description": "Partial knowledge testing simulating insider or compromised account",
+      "information_provided": "Network diagrams, user-level credentials, some documentation",
+      "advantages": "Balanced efficiency and realism, tests lateral movement",
+      "limitations": "May not identify all external attack vectors",
+      "typical_duration": "1-3 weeks"
+    },
+    "white_box": {
+      "description": "Full knowledge testing for comprehensive security assessment",
+      "information_provided": "Complete architecture, source code, credentials, configurations",
+      "advantages": "Maximum coverage, efficient use of time, code review possible",
+      "limitations": "Less realistic attacker simulation",
+      "typical_duration": "1-2 weeks"
+    },
+    "red_team": {
+      "description": "Adversarial simulation testing defensive capabilities (Blue Team)",
+      "information_provided": "Minimal, may include initial foothold",
+      "advantages": "Tests detection and response, realistic advanced threat",
+      "limitations": "Expensive, requires mature security program",
+      "typical_duration": "4-12 weeks"
+    }
+  },
+  "testing_phases": [
+    {
+      "phase": "1. Reconnaissance",
+      "objectives": ["Gather OSINT", "Map attack surface", "Identify technologies", "Discover potential entry points"],
+      "techniques": [
+        "WHOIS/DNS enumeration (whois, dig, nslookup, dnsenum)",
+        "Search engine dorking (Google, Shodan, Censys)",
+        "Social media intelligence (LinkedIn, GitHub, job postings)",
+        "Subdomain enumeration (Sublist3r, Amass, DNS brute force)",
+        "Email harvesting (theHarvester, Hunter.io)",
+        "Technology fingerprinting (Wappalyzer, BuiltWith)"
+      ],
+      "tools": ["Maltego", "theHarvester", "Recon-ng", "Shodan", "Amass", "Spiderfoot"]
+    },
+    {
+      "phase": "2. Scanning & Enumeration",
+      "objectives": ["Identify live hosts", "Discover open ports/services", "Enumerate versions", "Map network topology"],
+      "techniques": [
+        "Network scanning (Nmap: TCP SYN, UDP, service detection, OS fingerprinting)",
+        "Vulnerability scanning (Nessus, OpenVAS, Qualys)",
+        "Web application scanning (Burp Suite, OWASP ZAP, Nikto)",
+        "SMB enumeration (enum4linux, smbclient, CrackMapExec)",
+        "SNMP enumeration (snmpwalk, onesixtyone)",
+        "Directory brute forcing (Gobuster, Feroxbuster, Dirbuster)"
+      ],
+      "tools": ["Nmap", "Masscan", "Nessus", "Burp Suite Professional", "Metasploit", "CrackMapExec"]
+    },
+    {
+      "phase": "3. Exploitation",
+      "objectives": ["Gain initial access", "Validate exploitability", "Establish persistence", "Demonstrate business impact"],
+      "techniques": [
+        "Exploit public vulnerabilities (Metasploit, ExploitDB, CVE databases)",
+        "Password attacks (password spraying, credential stuffing, brute force)",
+        "Web exploitation (SQLi, XSS, XXE, SSRF, deserialization, file upload)",
+        "Social engineering (phishing, pretexting, physical access)",
+        "Wireless attacks (WPA cracking, rogue AP, evil twin)",
+        "Client-side attacks (malicious documents, drive-by downloads)"
+      ],
+      "tools": ["Metasploit Framework", "SQLmap", "Hydra", "John the Ripper", "Hashcat", "Responder", "Impacket"]
+    },
+    {
+      "phase": "4. Post-Exploitation",
+      "objectives": ["Escalate privileges", "Maintain access", "Lateral movement", "Exfiltrate data (simulated)"],
+      "techniques": [
+        "Privilege escalation (kernel exploits, misconfigurations, sudo abuse, weak ACLs)",
+        "Credential harvesting (Mimikatz, hashdump, Kerberoasting, NTDS.dit extraction)",
+        "Lateral movement (Pass-the-Hash, Pass-the-Ticket, PSExec, WMI)",
+        "Persistence mechanisms (scheduled tasks, registry keys, services, backdoors)",
+        "Data discovery (file shares, databases, source code, sensitive documents)",
+        "Evidence of access (screenshots, file listings, NOT actual data exfiltration)"
+      ],
+      "tools": ["Mimikatz", "BloodHound", "PowerShell Empire", "Cobalt Strike", "LinPEAS/WinPEAS", "Rubeus"]
+    },
+    {
+      "phase": "5. Reporting",
+      "objectives": ["Document findings", "Provide remediation", "Communicate business risk", "Enable verification"],
+      "deliverables": [
+        "Executive summary (1-2 pages, business language, key risks, high-level recommendations)",
+        "Technical report (detailed findings, exploitation steps, evidence, remediation guidance)",
+        "Finding template: Title, Severity, CVSS, Affected Systems, Description, Impact, Reproduction Steps, Evidence, Remediation, References",
+        "Attack narrative with complete exploitation chain",
+        "Remediation matrix with effort vs. risk prioritization"
+      ]
+    }
+  ],
+  "vulnerability_categories": {
+    "OWASP_Top_10": [
+      "A01:2021 - Broken Access Control",
+      "A02:2021 - Cryptographic Failures",
+      "A03:2021 - Injection",
+      "A04:2021 - Insecure Design",
+      "A05:2021 - Security Misconfiguration",
+      "A06:2021 - Vulnerable and Outdated Components",
+      "A07:2021 - Identification and Authentication Failures",
+      "A08:2021 - Software and Data Integrity Failures",
+      "A09:2021 - Security Logging and Monitoring Failures",
+      "A10:2021 - Server-Side Request Forgery (SSRF)"
+    ],
+    "common_network_vulnerabilities": [
+      "Unpatched software (SMB, RDP, SSH, web servers)",
+      "Weak/default credentials",
+      "Missing encryption (cleartext protocols: Telnet, FTP, HTTP)",
+      "Network segmentation failures (flat networks)",
+      "Open shares with sensitive data",
+      "Insecure remote access (VPN, RDP exposed without MFA)"
+    ]
+  },
+  "severity_classification": {
+    "critical": {
+      "cvss_range": "9.0-10.0",
+      "criteria": "Unauthenticated remote code execution, complete system compromise, or mass data exfiltration",
+      "examples": ["Unauthenticated RCE", "SQL injection with DBA privileges", "Authentication bypass"],
+      "remediation_sla": "Immediate (24-48 hours)"
+    },
+    "high": {
+      "cvss_range": "7.0-8.9",
+      "criteria": "Authenticated RCE, privilege escalation to admin, or sensitive data exposure",
+      "examples": ["Authenticated RCE", "Local privilege escalation", "Stored XSS in admin panel"],
+      "remediation_sla": "7 days"
+    },
+    "medium": {
+      "cvss_range": "4.0-6.9",
+      "criteria": "Information disclosure, partial access, or limited privilege escalation",
+      "examples": ["Reflected XSS", "Directory listing", "Weak password policy"],
+      "remediation_sla": "30 days"
+    },
+    "low": {
+      "cvss_range": "0.1-3.9",
+      "criteria": "Minimal impact, requires complex attack chain, or informational findings",
+      "examples": ["Missing security headers", "Verbose error messages", "SSL/TLS best practices"],
+      "remediation_sla": "90 days or next maintenance window"
+    }
+  },
+  "rules_of_engagement_template": {
+    "scope": {
+      "in_scope": ["List of IP ranges, domains, applications, physical locations"],
+      "out_of_scope": ["Third-party systems", "Production databases (if applicable)", "Social engineering (unless authorized)"],
+      "scope_creep_protocol": "Contact project manager before testing any system not explicitly listed"
+    },
+    "acceptable_techniques": [
+      "Automated scanning with rate limiting",
+      "Manual exploitation of identified vulnerabilities",
+      "Credential testing with provided wordlists only",
+      "Denial-of-service testing ONLY if explicitly authorized and scheduled"
+    ],
+    "prohibited_actions": [
+      "Denial of service attacks (unless explicitly authorized)",
+      "Data destruction or modification",
+      "Actual data exfiltration (simulate only)",
+      "Attacks against third-party systems",
+      "Social engineering without prior approval"
+    ],
+    "communication": {
+      "emergency_contact": "24/7 phone number for critical findings or unintended outages",
+      "status_updates": "Daily brief or as requested",
+      "critical_finding_notification": "Immediate notification for critical vulnerabilities",
+      "testing_window": "Business hours only / 24/7 (specify)"
+    },
+    "legal_protection": "Written authorization letter required before testing begins"
+  },
+  "remediation_guidance_framework": {
+    "finding_format": {
+      "title": "Clear, specific vulnerability name",
+      "severity": "CVSS score with vector string",
+      "description": "What the vulnerability is, where it exists",
+      "impact": "Business risk in non-technical terms",
+      "reproduction": "Step-by-step instructions to recreate",
+      "evidence": "Screenshots, command output, proof-of-concept",
+      "remediation": "Specific fix with code examples or configuration changes",
+      "references": "CVE, CWE, vendor advisories, OWASP guidance"
+    },
+    "remediation_best_practices": [
+      "Provide specific fixes, not generic advice (e.g., 'Upgrade OpenSSH to 8.9 or later' not 'Update software')",
+      "Include code snippets or configuration examples when possible",
+      "Offer workarounds for findings that cannot be immediately remediated",
+      "Prioritize remediation by exploitability AND business impact, not CVSS alone",
+      "Group related findings to avoid redundant fixes"
+    ]
+  },
+  "integration_guidance": {
+    "stage_1_detection": [
+      "Keywords: 'penetration test', 'pentest', 'red team', 'security assessment', 'ethical hack', 'vulnerability assessment'",
+      "Phrases: 'offensive security', 'exploitation', 'attack simulation', 'security testing'"
+    ],
+    "stage_5_injection": "When penetration_testing domain detected, inject expertise_injections and methodology phases into system prompt. Include engagement type definitions and rules of engagement template. Ensure output emphasizes ethical testing boundaries and comprehensive reporting."
+  },
+  "quality_criteria": [
+    "Clear scope definition with in-scope and out-of-scope systems",
+    "Rules of engagement addressing authorization, prohibited actions, and emergency contacts",
+    "Testing methodology follows industry standards (PTES, OWASP, NIST)",
+    "Findings include CVSS scores with business impact context",
+    "Remediation guidance is specific and actionable, not generic",
+    "All findings include proof-of-concept evidence",
+    "Report structure addresses both executive and technical audiences",
+    "Attack chains documented showing realistic threat scenarios",
+    "Re-test plan included for validation after remediation",
+    "Ethical boundaries clearly defined and respected"
+  ]
+}

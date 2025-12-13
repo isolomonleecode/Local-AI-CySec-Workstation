@@ -1,0 +1,144 @@
+{
+  "name": "Prompt Enhancement Pipeline - Fast Track",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "enhance-prompt-fast",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-trigger-fast",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [250, 300],
+      "webhookId": "prompt-enhance-fast"
+    },
+    {
+      "parameters": {
+        "url": "http://192.168.0.52:4000/v1/chat/completions",
+        "method": "POST",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"mistral-7b\",\n  \"messages\": [\n    {\n      \"role\": \"system\",\n      \"content\": \"You are an expert prompt analyzer. Analyze the user's prompt and identify:\\n1. Primary intent\\n2. Missing critical information\\n3. Key constraints needed\\n4. Top 3 risks or failure modes\\n\\nOutput ONLY valid JSON with this structure:\\n{\\n  \\\"intent\\\": \\\"string\\\",\\n  \\\"missing_info\\\": [\\\"string\\\"],\\n  \\\"constraints\\\": [\\\"string\\\"],\\n  \\\"risks\\\": [\\\"string\\\"]\\n}\"\n    },\n    {\n      \"role\": \"user\",\n      \"content\": \"{{ $json.body.prompt }}\"\n    }\n  ],\n  \"temperature\": 0.3,\n  \"max_tokens\": 400\n}",
+        "options": {}
+      },
+      "id": "combined-analysis-fast",
+      "name": "Combined Analysis",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "url": "http://192.168.0.52:4000/v1/chat/completions",
+        "method": "POST",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"qwen3-30b\",\n  \"messages\": [\n    {\n      \"role\": \"system\",\n      \"content\": \"You are a master prompt engineer. Generate 2 enhanced prompt variants (precision and balanced) using the analysis provided.\\n\\nEach variant must include system_prompt and user_prompt.\\n\\nOutput ONLY valid JSON:\\n{\\n  \\\"variants\\\": [\\n    {\\\"name\\\": \\\"precision\\\", \\\"system_prompt\\\": \\\"string\\\", \\\"user_prompt\\\": \\\"string\\\"},\\n    {\\\"name\\\": \\\"balanced\\\", \\\"system_prompt\\\": \\\"string\\\", \\\"user_prompt\\\": \\\"string\\\"}\\n  ]\\n}\"\n    },\n    {\n      \"role\": \"user\",\n      \"content\": \"Original: {{ $('Webhook Trigger').item.json.body.prompt }}\\n\\nAnalysis: {{ $json.body.choices[0].message.content }}\"\n    }\n  ],\n  \"temperature\": 0.7,\n  \"max_tokens\": 1500\n}",
+        "options": {}
+      },
+      "id": "variant-generation-fast",
+      "name": "Variant Generation",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [650, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const originalPrompt = $('Webhook Trigger').first().json.body.prompt;\nconst analysis = JSON.parse($('Combined Analysis').first().json.body.choices[0].message.content);\nconst variants = JSON.parse($input.first().json.body.choices[0].message.content);\n\nreturn {\n  json: {\n    original_prompt: originalPrompt,\n    analysis: analysis,\n    enhanced_prompts: variants.variants,\n    pipeline: \"fast-track\"\n  }\n};"
+      },
+      "id": "json-output-fast",
+      "name": "JSON Output",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [850, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json, null, 2) }}",
+        "options": {}
+      },
+      "id": "webhook-response-fast",
+      "name": "Webhook Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1050, 300]
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {
+      "main": [
+        [
+          {
+            "node": "Combined Analysis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Combined Analysis": {
+      "main": [
+        [
+          {
+            "node": "Variant Generation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Variant Generation": {
+      "main": [
+        [
+          {
+            "node": "JSON Output",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "JSON Output": {
+      "main": [
+        [
+          {
+            "node": "Webhook Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [],
+  "triggerCount": 1,
+  "updatedAt": "2025-12-09T00:00:00.000Z",
+  "versionId": "1"
+}

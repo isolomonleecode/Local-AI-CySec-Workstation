@@ -1,0 +1,280 @@
+{
+  "name": "Prompt Enhancement Pipeline - Deep Analysis",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "enhance-prompt-deep",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-trigger-deep",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [250, 300],
+      "webhookId": "prompt-enhance-deep"
+    },
+    {
+      "parameters": {
+        "url": "http://192.168.0.52:4000/v1/chat/completions",
+        "method": "POST",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"qwen3-30b\",\n  \"messages\": [\n    {\n      \"role\": \"system\",\n      \"content\": \"You are a cybersecurity domain expert. Analyze the prompt from a SECURITY perspective:\\n1. Security requirements (authentication, authorization, encryption, etc.)\\n2. Threat model considerations\\n3. Compliance frameworks that may apply\\n4. Data sensitivity classification\\n5. Required security controls\\n\\nOutput ONLY valid JSON with this structure:\\n{\\n  \\\"security_requirements\\\": [\\\"string\\\"],\\n  \\\"threat_model\\\": [\\\"string\\\"],\\n  \\\"compliance_frameworks\\\": [\\\"string\\\"],\\n  \\\"data_sensitivity\\\": \\\"public|internal|confidential|restricted\\\",\\n  \\\"required_controls\\\": [\\\"string\\\"]\\n}\"\n    },\n    {\n      \"role\": \"user\",\n      \"content\": \"{{ $json.body.prompt }}\"\n    }\n  ],\n  \"temperature\": 0.4,\n  \"max_tokens\": 800\n}",
+        "options": {}
+      },
+      "id": "security-analysis-deep",
+      "name": "Security Analysis Branch",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [450, 200]
+    },
+    {
+      "parameters": {
+        "url": "http://192.168.0.52:4000/v1/chat/completions",
+        "method": "POST",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"qwen3-30b\",\n  \"messages\": [\n    {\n      \"role\": \"system\",\n      \"content\": \"You are a technical implementation expert. Analyze the prompt from an ENGINEERING perspective:\\n1. Technical requirements (APIs, protocols, formats)\\n2. Performance considerations (latency, throughput, scalability)\\n3. Integration points\\n4. Testing requirements\\n5. Monitoring and observability needs\\n\\nOutput ONLY valid JSON with this structure:\\n{\\n  \\\"technical_requirements\\\": [\\\"string\\\"],\\n  \\\"performance_targets\\\": [\\\"string\\\"],\\n  \\\"integrations\\\": [\\\"string\\\"],\\n  \\\"testing_scope\\\": [\\\"string\\\"],\\n  \\\"observability\\\": [\\\"string\\\"]\\n}\"\n    },\n    {\n      \"role\": \"user\",\n      \"content\": \"{{ $json.body.prompt }}\"\n    }\n  ],\n  \"temperature\": 0.4,\n  \"max_tokens\": 800\n}",
+        "options": {}
+      },
+      "id": "engineering-analysis-deep",
+      "name": "Engineering Analysis Branch",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [450, 400]
+    },
+    {
+      "parameters": {
+        "url": "http://192.168.0.52:4000/v1/chat/completions",
+        "method": "POST",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"qwen3-30b\",\n  \"messages\": [\n    {\n      \"role\": \"system\",\n      \"content\": \"You are a business analyst. Analyze the prompt from a BUSINESS perspective:\\n1. Business objectives and KPIs\\n2. Stakeholder requirements\\n3. Success criteria\\n4. ROI considerations\\n5. Timeline and milestones\\n\\nOutput ONLY valid JSON with this structure:\\n{\\n  \\\"business_objectives\\\": [\\\"string\\\"],\\n  \\\"stakeholders\\\": [\\\"string\\\"],\\n  \\\"success_criteria\\\": [\\\"string\\\"],\\n  \\\"roi_factors\\\": [\\\"string\\\"],\\n  \\\"timeline\\\": \\\"string\\\"\\n}\"\n    },\n    {\n      \"role\": \"user\",\n      \"content\": \"{{ $json.body.prompt }}\"\n    }\n  ],\n  \"temperature\": 0.4,\n  \"max_tokens\": 700\n}",
+        "options": {}
+      },
+      "id": "business-analysis-deep",
+      "name": "Business Analysis Branch",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [450, 600]
+    },
+    {
+      "parameters": {
+        "mode": "mergeByPosition"
+      },
+      "id": "merge-analyses",
+      "name": "Merge Analysis Branches",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 2.1,
+      "position": [750, 400]
+    },
+    {
+      "parameters": {
+        "url": "http://192.168.0.52:4000/v1/chat/completions",
+        "method": "POST",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"qwen3-30b\",\n  \"messages\": [\n    {\n      \"role\": \"system\",\n      \"content\": \"You are a synthesis expert. Given multi-perspective analysis (security, engineering, business), create:\\n1. Unified requirements list (reconcile conflicts)\\n2. Prioritized constraints\\n3. Comprehensive risk assessment\\n4. Holistic role definition\\n5. Cross-functional quality criteria\\n\\nOutput ONLY valid JSON with this structure:\\n{\\n  \\\"unified_requirements\\\": [\\\"string\\\"],\\n  \\\"prioritized_constraints\\\": [{\\\"constraint\\\": \\\"string\\\", \\\"priority\\\": \\\"high|medium|low\\\"}],\\n  \\\"comprehensive_risks\\\": [{\\\"category\\\": \\\"security|technical|business\\\", \\\"risk\\\": \\\"string\\\", \\\"mitigation\\\": \\\"string\\\"}],\\n  \\\"role_definition\\\": \\\"string\\\",\\n  \\\"quality_criteria\\\": [\\\"string\\\"]\\n}\"\n    },\n    {\n      \"role\": \"user\",\n      \"content\": \"Original Prompt: {{ $('Webhook Trigger').item.json.body.prompt }}\\n\\nSecurity Analysis:\\n{{ $('Security Analysis Branch').item.json.body.choices[0].message.content }}\\n\\nEngineering Analysis:\\n{{ $('Engineering Analysis Branch').item.json.body.choices[0].message.content }}\\n\\nBusiness Analysis:\\n{{ $('Business Analysis Branch').item.json.body.choices[0].message.content }}\"\n    }\n  ],\n  \"temperature\": 0.5,\n  \"max_tokens\": 1200\n}",
+        "options": {}
+      },
+      "id": "consensus-synthesis",
+      "name": "Consensus Synthesis",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [950, 400]
+    },
+    {
+      "parameters": {
+        "url": "http://192.168.0.52:4000/v1/chat/completions",
+        "method": "POST",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"qwen3-30b\",\n  \"messages\": [\n    {\n      \"role\": \"system\",\n      \"content\": \"You are a master prompt engineer. Generate 4 enhanced prompt variants using comprehensive multi-perspective analysis:\\n\\n1. **Security-First**: Prioritize security controls and compliance\\n2. **Performance-Optimized**: Prioritize speed and scalability\\n3. **Business-Aligned**: Prioritize ROI and stakeholder value\\n4. **Holistic**: Balanced integration of all perspectives\\n\\nEach variant must be production-ready.\\n\\nOutput ONLY valid JSON:\\n{\\n  \\\"variants\\\": [\\n    {\\n      \\\"name\\\": \\\"security-first|performance-optimized|business-aligned|holistic\\\",\\n      \\\"system_prompt\\\": \\\"string\\\",\\n      \\\"user_prompt\\\": \\\"string\\\",\\n      \\\"output_format\\\": \\\"string\\\",\\n      \\\"quality_criteria\\\": [\\\"string\\\"],\\n      \\\"perspective_weights\\\": {\\\"security\\\": number, \\\"engineering\\\": number, \\\"business\\\": number}\\n    }\\n  ]\\n}\"\n    },\n    {\n      \"role\": \"user\",\n      \"content\": \"Original Prompt: {{ $('Webhook Trigger').item.json.body.prompt }}\\n\\nSynthesized Analysis:\\n{{ $json.body.choices[0].message.content }}\\n\\nGenerate 4 perspective-weighted variants.\"\n    }\n  ],\n  \"temperature\": 0.7,\n  \"max_tokens\": 3000\n}",
+        "options": {}
+      },
+      "id": "multi-variant-generation",
+      "name": "Multi-Variant Generation",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1150, 400]
+    },
+    {
+      "parameters": {
+        "jsCode": "const originalPrompt = $('Webhook Trigger').first().json.body.prompt;\n\nconst parseStage = (stageData) => {\n  try {\n    return JSON.parse(stageData.body.choices[0].message.content);\n  } catch (e) {\n    return { raw: stageData.body.choices[0].message.content, parse_error: true };\n  }\n};\n\nconst securityAnalysis = parseStage($('Security Analysis Branch').first().json);\nconst engineeringAnalysis = parseStage($('Engineering Analysis Branch').first().json);\nconst businessAnalysis = parseStage($('Business Analysis Branch').first().json);\nconst synthesis = parseStage($('Consensus Synthesis').first().json);\nconst variants = parseStage($input.first().json);\n\nreturn {\n  json: {\n    metadata: {\n      original_prompt: originalPrompt,\n      pipeline_version: \"deep-analysis-1.0.0\",\n      timestamp: new Date().toISOString(),\n      analysis_branches: 3,\n      models_used: \"qwen3-30b\"\n    },\n    multi_perspective_analysis: {\n      security: securityAnalysis,\n      engineering: engineeringAnalysis,\n      business: businessAnalysis,\n      synthesis: synthesis\n    },\n    enhanced_prompts: variants.variants || variants,\n    usage_guide: {\n      \"security-first\": \"Compliance-heavy tasks, regulated environments, threat modeling\",\n      \"performance-optimized\": \"High-throughput systems, real-time processing, scalability challenges\",\n      \"business-aligned\": \"Executive reporting, ROI-focused projects, stakeholder presentations\",\n      \"holistic\": \"Complex enterprise projects requiring balanced trade-offs\"\n    }\n  }\n};"
+      },
+      "id": "final-json-output",
+      "name": "Final JSON Output",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1350, 400]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json, null, 2) }}",
+        "options": {}
+      },
+      "id": "webhook-response-deep",
+      "name": "Webhook Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1550, 400]
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {
+      "main": [
+        [
+          {
+            "node": "Security Analysis Branch",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Engineering Analysis Branch",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Business Analysis Branch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Security Analysis Branch": {
+      "main": [
+        [
+          {
+            "node": "Merge Analysis Branches",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Engineering Analysis Branch": {
+      "main": [
+        [
+          {
+            "node": "Merge Analysis Branches",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Business Analysis Branch": {
+      "main": [
+        [
+          {
+            "node": "Merge Analysis Branches",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "Merge Analysis Branches": {
+      "main": [
+        [
+          {
+            "node": "Consensus Synthesis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Consensus Synthesis": {
+      "main": [
+        [
+          {
+            "node": "Multi-Variant Generation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Multi-Variant Generation": {
+      "main": [
+        [
+          {
+            "node": "Final JSON Output",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Final JSON Output": {
+      "main": [
+        [
+          {
+            "node": "Webhook Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [],
+  "triggerCount": 1,
+  "updatedAt": "2025-12-09T00:00:00.000Z",
+  "versionId": "1"
+}

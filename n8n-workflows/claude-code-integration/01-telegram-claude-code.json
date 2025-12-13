@@ -1,0 +1,282 @@
+{
+  "name": "Telegram → Claude Code Assistant",
+  "nodes": [
+    {
+      "parameters": {
+        "updates": [
+          "message"
+        ]
+      },
+      "id": "telegram-trigger",
+      "name": "Telegram Polling Trigger",
+      "type": "n8n-nodes-telegram-polling.telegramPollingTrigger",
+      "typeVersion": 1,
+      "position": [
+        240,
+        300
+      ],
+      "webhookId": "",
+      "credentials": {
+        "telegramApi": {
+          "id": "1",
+          "name": "Telegram Bot API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "sendMessage",
+        "chatId": "={{$json.message.chat.id}}",
+        "text": "🤖 Processing your request with Claude Code..."
+      },
+      "id": "send-acknowledgment",
+      "name": "Send Acknowledgment",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.1,
+      "position": [
+        460,
+        300
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "1",
+          "name": "Telegram Bot API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "user-message",
+              "name": "userMessage",
+              "value": "={{$json.message.text}}",
+              "type": "string"
+            },
+            {
+              "id": "chat-id",
+              "name": "chatId",
+              "value": "={{$json.message.chat.id}}",
+              "type": "number"
+            },
+            {
+              "id": "user-name",
+              "name": "userName",
+              "value": "={{$json.message.from.first_name}} {{$json.message.from.last_name}}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "extract-message-data",
+      "name": "Extract Message Data",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.3,
+      "position": [
+        680,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "anthropicApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "model",
+              "value": "claude-sonnet-4-5-20250929"
+            },
+            {
+              "name": "max_tokens",
+              "value": "4096"
+            },
+            {
+              "name": "system",
+              "value": "You are Claude Code, an AI coding assistant. You help users with programming questions, code review, debugging, and technical explanations. Be concise but thorough. Format code blocks using markdown with triple backticks and language identifiers."
+            },
+            {
+              "name": "messages",
+              "value": "=[{\"role\": \"user\", \"content\": \"{{$json.userMessage}}\"}]"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "call-claude-api",
+      "name": "Call Claude API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        900,
+        300
+      ],
+      "credentials": {
+        "anthropicApi": {
+          "id": "2",
+          "name": "Anthropic API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract Claude's response from the API\nconst apiResponse = $input.all()[0].json;\nconst claudeResponse = apiResponse.content[0].text;\n\n// Get chat ID from previous node\nconst chatId = $('Extract Message Data').first().json.chatId;\n\n// Format response for Telegram\n// Replace markdown code blocks with Telegram-compatible format\nlet formattedResponse = claudeResponse;\n\n// Split long messages if needed (Telegram has 4096 char limit)\nconst maxLength = 4000;\nconst responses = [];\n\nif (formattedResponse.length > maxLength) {\n  // Split by paragraphs first\n  const paragraphs = formattedResponse.split('\\n\\n');\n  let currentChunk = '';\n  \n  for (const para of paragraphs) {\n    if ((currentChunk + para).length > maxLength) {\n      responses.push(currentChunk);\n      currentChunk = para;\n    } else {\n      currentChunk += (currentChunk ? '\\n\\n' : '') + para;\n    }\n  }\n  if (currentChunk) responses.push(currentChunk);\n} else {\n  responses.push(formattedResponse);\n}\n\nreturn responses.map((text, index) => ({\n  json: {\n    chatId: chatId,\n    text: text,\n    parseMode: 'Markdown',\n    messageIndex: index + 1,\n    totalMessages: responses.length\n  }\n}));"
+      },
+      "id": "format-response",
+      "name": "Format Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "sendMessage",
+        "chatId": "={{$json.chatId}}",
+        "text": "={{$json.text}}",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "id": "send-claude-response",
+      "name": "Send Claude Response",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.1,
+      "position": [
+        1340,
+        300
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "1",
+          "name": "Telegram Bot API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "sendMessage",
+        "chatId": "={{$('Extract Message Data').first().json.chatId}}",
+        "text": "❌ Error: {{$json.message}}\n\nPlease try again or contact support if the issue persists."
+      },
+      "id": "send-error-message",
+      "name": "Send Error Message",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.1,
+      "position": [
+        1120,
+        480
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "1",
+          "name": "Telegram Bot API"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Telegram Polling Trigger": {
+      "main": [
+        [
+          {
+            "node": "Send Acknowledgment",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Acknowledgment": {
+      "main": [
+        [
+          {
+            "node": "Extract Message Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Message Data": {
+      "main": [
+        [
+          {
+            "node": "Call Claude API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call Claude API": {
+      "main": [
+        [
+          {
+            "node": "Format Response",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send Error Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Response": {
+      "main": [
+        [
+          {
+            "node": "Send Claude Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [
+    {
+      "createdAt": "2025-12-11T19:00:00.000Z",
+      "updatedAt": "2025-12-11T19:00:00.000Z",
+      "id": "1",
+      "name": "claude-code"
+    },
+    {
+      "createdAt": "2025-12-11T19:00:00.000Z",
+      "updatedAt": "2025-12-11T19:00:00.000Z",
+      "id": "2",
+      "name": "telegram"
+    }
+  ],
+  "pinData": {},
+  "versionId": "1"
+}

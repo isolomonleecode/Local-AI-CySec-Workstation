@@ -1,0 +1,296 @@
+{
+  "name": "Slack → Claude Code Assistant",
+  "nodes": [
+    {
+      "parameters": {
+        "events": [
+          "app_mention",
+          "message.im"
+        ],
+        "options": {}
+      },
+      "id": "slack-trigger",
+      "name": "Slack Trigger",
+      "type": "n8n-nodes-base.slackTrigger",
+      "typeVersion": 1,
+      "position": [
+        240,
+        300
+      ],
+      "webhookId": "slack-webhook-id",
+      "credentials": {
+        "slackApi": {
+          "id": "3",
+          "name": "Slack API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "post",
+        "channel": "={{$json.event.channel}}",
+        "text": ":robot_face: Processing your request with Claude Code..."
+      },
+      "id": "send-acknowledgment",
+      "name": "Send Acknowledgment",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.1,
+      "position": [
+        460,
+        300
+      ],
+      "credentials": {
+        "slackApi": {
+          "id": "3",
+          "name": "Slack API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "user-message",
+              "name": "userMessage",
+              "value": "={{$json.event.text.replace(/<@[A-Z0-9]+>/g, '').trim()}}",
+              "type": "string"
+            },
+            {
+              "id": "channel-id",
+              "name": "channelId",
+              "value": "={{$json.event.channel}}",
+              "type": "string"
+            },
+            {
+              "id": "thread-ts",
+              "name": "threadTs",
+              "value": "={{$json.event.ts}}",
+              "type": "string"
+            },
+            {
+              "id": "user-id",
+              "name": "userId",
+              "value": "={{$json.event.user}}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "extract-message-data",
+      "name": "Extract Message Data",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.3,
+      "position": [
+        680,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "anthropicApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "model",
+              "value": "claude-sonnet-4-5-20250929"
+            },
+            {
+              "name": "max_tokens",
+              "value": "4096"
+            },
+            {
+              "name": "system",
+              "value": "You are Claude Code, an AI coding assistant integrated into Slack. You help users with programming questions, code review, debugging, and technical explanations. Format code blocks using triple backticks with language identifiers. Be concise but thorough."
+            },
+            {
+              "name": "messages",
+              "value": "=[{\"role\": \"user\", \"content\": \"{{$json.userMessage}}\"}]"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "call-claude-api",
+      "name": "Call Claude API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        900,
+        300
+      ],
+      "credentials": {
+        "anthropicApi": {
+          "id": "2",
+          "name": "Anthropic API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract Claude's response from the API\nconst apiResponse = $input.all()[0].json;\nconst claudeResponse = apiResponse.content[0].text;\n\n// Get channel and thread info from previous node\nconst extractedData = $('Extract Message Data').first().json;\n\n// Slack has a 4000 char limit per message\nconst maxLength = 3900;\nconst responses = [];\n\nif (claudeResponse.length > maxLength) {\n  // Split by paragraphs first\n  const paragraphs = claudeResponse.split('\\n\\n');\n  let currentChunk = '';\n  \n  for (const para of paragraphs) {\n    if ((currentChunk + para).length > maxLength) {\n      responses.push(currentChunk);\n      currentChunk = para;\n    } else {\n      currentChunk += (currentChunk ? '\\n\\n' : '') + para;\n    }\n  }\n  if (currentChunk) responses.push(currentChunk);\n} else {\n  responses.push(claudeResponse);\n}\n\nreturn responses.map((text, index) => ({\n  json: {\n    channelId: extractedData.channelId,\n    threadTs: extractedData.threadTs,\n    text: text,\n    messageIndex: index + 1,\n    totalMessages: responses.length\n  }\n}));"
+      },
+      "id": "format-response",
+      "name": "Format Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "post",
+        "channel": "={{$json.channelId}}",
+        "text": "={{$json.text}}",
+        "otherOptions": {
+          "thread_ts": "={{$json.threadTs}}"
+        }
+      },
+      "id": "send-claude-response",
+      "name": "Send Claude Response",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.1,
+      "position": [
+        1340,
+        300
+      ],
+      "credentials": {
+        "slackApi": {
+          "id": "3",
+          "name": "Slack API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "post",
+        "channel": "={{$('Extract Message Data').first().json.channelId}}",
+        "text": ":x: Error: {{$json.message}}\\n\\nPlease try again or contact support if the issue persists.",
+        "otherOptions": {
+          "thread_ts": "={{$('Extract Message Data').first().json.threadTs}}"
+        }
+      },
+      "id": "send-error-message",
+      "name": "Send Error Message",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.1,
+      "position": [
+        1120,
+        480
+      ],
+      "credentials": {
+        "slackApi": {
+          "id": "3",
+          "name": "Slack API"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Slack Trigger": {
+      "main": [
+        [
+          {
+            "node": "Send Acknowledgment",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Acknowledgment": {
+      "main": [
+        [
+          {
+            "node": "Extract Message Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Message Data": {
+      "main": [
+        [
+          {
+            "node": "Call Claude API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call Claude API": {
+      "main": [
+        [
+          {
+            "node": "Format Response",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send Error Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Response": {
+      "main": [
+        [
+          {
+            "node": "Send Claude Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [
+    {
+      "createdAt": "2025-12-11T19:00:00.000Z",
+      "updatedAt": "2025-12-11T19:00:00.000Z",
+      "id": "1",
+      "name": "claude-code"
+    },
+    {
+      "createdAt": "2025-12-11T19:00:00.000Z",
+      "updatedAt": "2025-12-11T19:00:00.000Z",
+      "id": "3",
+      "name": "slack"
+    }
+  ],
+  "pinData": {},
+  "versionId": "1"
+}
