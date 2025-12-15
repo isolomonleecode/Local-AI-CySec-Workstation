@@ -1,0 +1,235 @@
+{
+  "name": "Wazuh Security Analyzer - Simple",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "wazuh-alert",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "ee100218-22e9-461d-a351-c6fef96d8818",
+      "name": "Webhook",
+      "webhookId": "e5dd4cd3-a108-48a0-959c-757a5fbd0ab8"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract relevant fields from Wazuh alert\nconst alert = $input.first().json;\n\n// Wazuh alert structure varies, handle common fields\nconst alertData = alert.data || alert;\n\nreturn [{\njson: {\nalert_id: alertData.id || alertData.alert_id || \"unknown\",\ntimestamp: alertData.timestamp || alertData[\"@timestamp\"] || new Date().toISOString(),\nrule_description: alertData.rule?.description || alertData.description || \"No description\",\nrule_level: alertData.rule?.level || alertData.level || 0,\nagent_name: alertData.agent?.name || alertData.agent_name || \"unknown\",\nagent_ip: alertData.agent?.ip || alertData.agent_ip || \"unknown\",\nfull_log: alertData.full_log || JSON.stringify(alertData),\nraw_alert: JSON.stringify(alert)\n}\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        208,
+        0
+      ],
+      "id": "2b843bfe-2f3f-4074-b48d-0f59beb1d2e1",
+      "name": "Parse Wazuh Alert"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Get parsed alert data\nconst alert = $input.first().json;\n\n// Construct security analysis prompt\nconst systemPrompt = \"You are a cybersecurity analyst. Analyze security alerts concisely and provide actionable recommendations.\";\n\nconst userPrompt = `Analyze this security alert:\n\n**Event:** ${alert.rule_description}\n**Severity Level:** ${alert.rule_level}/15\n**Agent:** ${alert.agent_name} (${alert.agent_ip})\n**Time:** ${alert.timestamp}\n**Details:** ${alert.full_log}\n\nProvide:\n1. Risk assessment (Low/Medium/High)\n2. Likely cause\n3. Recommended action (1 sentence)\n\nKeep response under 150 words.`;\n\nreturn [{\njson: {\nalert: alert,\nsystem_prompt: systemPrompt,\nuser_prompt: userPrompt\n}\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        416,
+        -192
+      ],
+      "id": "9e833bd9-2c45-47ad-a2a6-2bed416bfc8a",
+      "name": "Build AI Prompt"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://192.168.0.52:8080/v1/chat/completions",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n\"model\": \"llama-3.1-8b-instruct\",\n\"messages\": [\n{\n\"role\": \"system\",\n\"content\": \"{{ $json.system_prompt }}\"\n},\n{\n\"role\": \"user\",\n\"content\": \"{{ $json.user_prompt }}\"\n}\n],\n\"temperature\": 0.3,\n\"max_tokens\": 200\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        672,
+        -192
+      ],
+      "id": "44e53ccb-3e9d-45b6-af03-d20d7c58b77f",
+      "name": "AI Analysis"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://192.168.0.19:3000/api/annotations",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "grafanaApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n\"tags\": [\"wazuh-alert\", \"ai-analyzed\"],\n\"text\": \"{{ $node['Parse Wazuh Alert'].json.rule_description }}\\n\\n**AI Analysis:**\\n{{ $json.ai_analysis }}\",\n\"time\": {{ new Date($node['Parse Wazuh Alert'].json.timestamp).getTime() }}\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        832,
+        0
+      ],
+      "id": "6a2e8a2a-85e9-4b9a-81e0-5500bd72ce3b",
+      "name": "Create Grafana Annotation",
+      "credentials": {
+        "grafanaApi": {
+          "id": "PhIv2VadLEYwDeih",
+          "name": "Grafana Service Account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Get parsed alert\nconst alert = $input.first().json;\n\n// Build prompt\nconst systemPrompt = \"You are a cybersecurity analyst. Analyze security alerts concisely and provide actionable recommendations.\";\n\nconst userPrompt = `Analyze this security alert:\n\n**Event:** ${alert.rule_description}\n**Severity Level:** ${alert.rule_level}/15\n**Agent:** ${alert.agent_name} (${alert.agent_ip})\n**Time:** ${alert.timestamp}\n**Details:** ${alert.full_log}\n\nProvide:\n1. Risk assessment (Low/Medium/High)\n2. Likely cause\n3. Recommended action (1 sentence)\n\nKeep response under 150 words.`;\n\n// Return data for HTTP node\nreturn [{\njson: {\nalert: alert,\nrequest_body: {\nmodel: \"llama-3.1-8b-instruct\",\nmessages: [\n{ role: \"system\", content: systemPrompt },\n{ role: \"user\", content: userPrompt }\n],\ntemperature: 0.3,\nmax_tokens: 200\n}\n}\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        416,
+        0
+      ],
+      "id": "cbbb920c-7782-4ca3-8a59-5cfa9883d813",
+      "name": "Build AI Request Data"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://192.168.0.52:8080/v1/chat/completions",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.request_body) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        624,
+        0
+      ],
+      "id": "9859227e-c289-4573-8421-6991634d253f",
+      "name": "Call LocalAI"
+    }
+  ],
+  "pinData": {
+    "Webhook": [
+      {
+        "json": {
+          "headers": {
+            "host": "192.168.0.52:5678",
+            "user-agent": "curl/8.17.0",
+            "accept": "*/*",
+            "content-type": "application/json",
+            "content-length": "511"
+          },
+          "params": {},
+          "query": {},
+          "body": {
+            "id": "1702847123.12345",
+            "timestamp": "2025-12-15T04:45:30.000Z",
+            "rule": {
+              "level": 10,
+              "description": "sshd: brute force trying to get access to the system",
+              "id": "5712",
+              "groups": [
+                "syslog",
+                "sshd",
+                "authentication_failed"
+              ]
+            },
+            "agent": {
+              "id": "001",
+              "name": "capcorp9000",
+              "ip": "192.168.0.52"
+            },
+            "full_log": "Dec 15 04:45:30 capcorp9000 sshd[12345]: Failed password for invalid user admin from 203.0.113.45 port 52341 ssh2",
+            "data": {
+              "srcip": "203.0.113.45",
+              "srcport": "52341",
+              "dstuser": "admin"
+            }
+          },
+          "webhookUrl": "http://192.168.0.52:5678/webhook-test/wazuh-alert",
+          "executionMode": "test"
+        },
+        "pairedItem": {
+          "item": 0
+        }
+      }
+    ]
+  },
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Parse Wazuh Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Wazuh Alert": {
+      "main": [
+        [
+          {
+            "node": "Build AI Request Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build AI Prompt": {
+      "main": [
+        []
+      ]
+    },
+    "AI Analysis": {
+      "main": [
+        []
+      ]
+    },
+    "Build AI Request Data": {
+      "main": [
+        [
+          {
+            "node": "Call LocalAI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call LocalAI": {
+      "main": [
+        [
+          {
+            "node": "Create Grafana Annotation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "b8bc1196-6a4a-4aca-a355-76dddc32b1ab",
+  "meta": {
+    "instanceId": "94eeddc04165ddcbf27192c9290117cde83c0b529aaab68ac4c23173f2841784"
+  },
+  "id": "FZPqltmYW51642Ib",
+  "tags": []
+}
