@@ -1,0 +1,300 @@
+{
+  "name": "Intelligent Model Selector v1",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -240,
+        -224
+      ],
+      "id": "6c873a2a-b0e7-45bb-ad1c-64fb02c5eabf",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "dcd2ab5f-fdbd-408f-a50b-394a1f335da5",
+              "name": "default_model",
+              "value": "llama-3.1-8b-instruct",
+              "type": "string"
+            },
+            {
+              "id": "cfba1792-98ab-4052-9a63-3788511d9453",
+              "name": "temperature",
+              "value": "0.3",
+              "type": "string"
+            },
+            {
+              "id": "04eb32ce-1d9f-4278-9730-e1861d674d45",
+              "name": "gpu_vram_total",
+              "value": "16",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -32,
+        -224
+      ],
+      "id": "01918ca3-1a2b-47d8-801a-7bc0d3ef10f1",
+      "name": "Config - Model Selection"
+    },
+    {
+      "parameters": {
+        "url": "http://192.168.0.52:8080/v1/models",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        176,
+        -224
+      ],
+      "id": "fed82f7b-f1e5-4d54-9675-1befe48841fb",
+      "name": "Query All Available Models"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Get models from previous node\nconst models = $node[\"Query All Available Models\"].json.data;\nconst config = $node[\"Config - Model Selection\"].json;\n\n// Define VRAM estimates (in GB)\nconst vramEstimates = {\n\"huggingfacetb_smollm3-3b\": 2,\n\"llama-3.1-8b-instruct\": 5,\n\"mistral-7b-instruct\": 4,\n\"qwen2.5-7b\": 5,\n\"gpt-oss-20b\": 12,\n\"Qwen3-30B-A3B-Q3_K_M\": 14,\n\"granite-embedding\": 0.3,\n\"localai-functioncall-qwen2.5-7b-v0.5-q4_k_m\": 5\n};\n\n// Filter to LLM models only (exclude TTS, whisper, image gen, embeddings)\nconst excludePatterns = [\"whisper\", \"tts\", \"stable-diffusion\", \"stablediffusion\",\n\"embedding\", \"vad\", \"reranker\", \"mmproj\", \"galatolo\", \"minicpm\"];\n\nconst llmModels = models.filter(m => {\nreturn !excludePatterns.some(pattern => m.id.toLowerCase().includes(pattern));\n});\n\n// Enrich with VRAM estimates\nconst enrichedModels = llmModels.map(m => {\nconst vram = vramEstimates[m.id] || 10; // Default 10GB if unknown\nconst isDefault = m.id === config.default_model;\n\nreturn {\nid: m.id,\nvram_gb: vram,\nfits_in_vram: vram <= config.gpu_vram_total,\nis_default: isDefault,\nspeed: vram < 10 ? \"⚡ Fast\" : vram < 15 ? \"🚀 Medium\" : \"🐌 Slow\",\nquality: vram < 10 ? \"📊 Good\" : vram < 15 ? \"📊📊 Better\" : \"📊📊📊 Best\"\n};\n});\n\n// Sort by VRAM (smallest first)\nenrichedModels.sort((a, b) => a.vram_gb - b.vram_gb);\n\nreturn [{ json: {\nmodels: enrichedModels,\ntotal_vram: config.gpu_vram_total,\ndefault_model: config.default_model,\ntemperature: config.temperature\n}}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        384,
+        -224
+      ],
+      "id": "11943023-a97c-4eb0-91d7-48248f9b5021",
+      "name": "Format Models with VRAM"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Get the chosen model and formatted models data\nconst data = $input.first().json;\nconst chosenModel = data.default_model;\nconst allModels = data.models;\n\n// LocalAI backend API for model management\nconst localaiUrl = \"http://192.168.0.52:8080\";\n\n// Get currently loaded models (if API supports it)\n// Note: This endpoint might not exist in all LocalAI versions\n// If it fails, we'll skip unloading and rely on LocalAI's memory management\n\nconst modelsToUnload = allModels\n.filter(m => m.id !== chosenModel && m.id !== \"llama-3.2-3b-instruct:q4_k_m\") // Never unload default\n.map(m => m.id);\n\nreturn [{\njson: {\nchosen_model: chosenModel,\ntemperature: data.temperature,\nmodels_to_unload: modelsToUnload,\ntotal_models: allModels.length,\nunload_count: modelsToUnload.length\n}\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        592,
+        -224
+      ],
+      "id": "65a3234e-9398-4390-bc35-439ba8f3912d",
+      "name": "Unload Unused Models"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://192.168.0.52:8080/v1/chat/completions",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n\"model\": \"{{ $json.chosen_model }}\",\n\"messages\": [\n{\n\"role\": \"system\",\n\"content\": \"You are a helpful AI assistant. Respond concisely.\"\n},\n{\n\"role\": \"user\",\n\"content\": \"Explain what you are and confirm you're running on the {{ $json.chosen_model }} model.\"\n}\n],\n\"temperature\": {{ parseFloat($json.temperature) }},\n\"max_tokens\": 150\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        800,
+        -224
+      ],
+      "id": "6f4a7a71-adb3-4a50-87d6-49d3c753f34c",
+      "name": "AI Analysis with Chosen Model"
+    }
+  ],
+  "pinData": {
+    "Config - Model Selection": [
+      {
+        "json": {
+          "default_model": "llama-3.1-8b-instruct",
+          "temperature": "0.3",
+          "gpu_vram_total": "16"
+        },
+        "pairedItem": {
+          "item": 0
+        }
+      }
+    ],
+    "Query All Available Models": [
+      {
+        "json": {
+          "object": "list",
+          "data": [
+            {
+              "id": "llama-3.2-3b-instruct:q4_k_m",
+              "object": "model"
+            },
+            {
+              "id": "silero-vad",
+              "object": "model"
+            },
+            {
+              "id": "text-embedding-ada-002",
+              "object": "model"
+            },
+            {
+              "id": "gpt-4",
+              "object": "model"
+            },
+            {
+              "id": "stablediffusion",
+              "object": "model"
+            },
+            {
+              "id": "gpt-4o",
+              "object": "model"
+            },
+            {
+              "id": "jina-reranker-v1-base-en",
+              "object": "model"
+            },
+            {
+              "id": "huggingfacetb_smollm3-3b",
+              "object": "model"
+            },
+            {
+              "id": "Qwen3-30B-A3B-Q3_K_M",
+              "object": "model"
+            },
+            {
+              "id": "gpt-oss-20b",
+              "object": "model"
+            },
+            {
+              "id": "kitten-tts",
+              "object": "model"
+            },
+            {
+              "id": "llama-3.1-8b-instruct",
+              "object": "model"
+            },
+            {
+              "id": "mistral-7b-instruct",
+              "object": "model"
+            },
+            {
+              "id": "stable-diffusion-3-medium",
+              "object": "model"
+            },
+            {
+              "id": "tts-1",
+              "object": "model"
+            },
+            {
+              "id": "whisper-1",
+              "object": "model"
+            },
+            {
+              "id": "Qwen3-VL-30B-A3B-Instruct-Q4_K_M.gguf",
+              "object": "model"
+            },
+            {
+              "id": "galatolo-Q4_K.gguf",
+              "object": "model"
+            },
+            {
+              "id": "minicpm-v-4_5-mmproj-f16.gguf",
+              "object": "model"
+            }
+          ]
+        },
+        "pairedItem": {
+          "item": 0
+        }
+      }
+    ],
+    "Unload Unused Models": [
+      {
+        "json": {
+          "chosen_model": "llama-3.1-8b-instruct",
+          "temperature": "0.3",
+          "models_to_unload": [
+            "huggingfacetb_smollm3-3b",
+            "mistral-7b-instruct",
+            "gpt-4",
+            "gpt-4o",
+            "Qwen3-VL-30B-A3B-Instruct-Q4_K_M.gguf",
+            "gpt-oss-20b",
+            "Qwen3-30B-A3B-Q3_K_M"
+          ],
+          "total_models": 9,
+          "unload_count": 7
+        },
+        "pairedItem": {
+          "item": 0
+        }
+      }
+    ]
+  },
+  "connections": {
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "Config - Model Selection",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config - Model Selection": {
+      "main": [
+        [
+          {
+            "node": "Query All Available Models",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Query All Available Models": {
+      "main": [
+        [
+          {
+            "node": "Format Models with VRAM",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Models with VRAM": {
+      "main": [
+        [
+          {
+            "node": "Unload Unused Models",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Unload Unused Models": {
+      "main": [
+        [
+          {
+            "node": "AI Analysis with Chosen Model",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "aa0347ca-a581-4688-b0d6-fe5e30213175",
+  "meta": {
+    "instanceId": "94eeddc04165ddcbf27192c9290117cde83c0b529aaab68ac4c23173f2841784"
+  },
+  "id": "MyN7VwNngFtrzfGb",
+  "tags": []
+}
