@@ -1,0 +1,539 @@
+{
+  "name": "Wazuh Security Analyzer - Dynamic",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "wazuh-alert-dynamic",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -256,
+        -688
+      ],
+      "id": "77d9cbce-f1ca-4053-8427-cb4c0c7f21b3",
+      "name": "Webhook",
+      "webhookId": "85d7e30b-8b2b-4e8c-8259-105e8be29f48"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://192.168.0.19:3000/api/annotations",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "grafanaApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.annotation_body) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        1536,
+        -720
+      ],
+      "id": "8c1338fc-b549-4996-ad86-9c98a44c0a09",
+      "name": "Create Grafana Annotation",
+      "credentials": {
+        "grafanaApi": {
+          "id": "PhIv2VadLEYwDeih",
+          "name": "Grafana Service Account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://192.168.0.52:8080/v1/chat/completions",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.request_body) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        864,
+        -672
+      ],
+      "id": "0e6d8e0e-e3f4-4a4d-8e0e-f48608a21abf",
+      "name": "Call LocalAI",
+      "retryOnFail": true,
+      "waitBetweenTries": 2000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "url": "http://192.168.0.19:9090/api/v1/query",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "query",
+              "value": "amd_gpu_memory_free_bytes / 1024 / 1024 / 1024"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        128,
+        -688
+      ],
+      "id": "b0cd006a-8533-4988-8505-31cb44619c0d",
+      "name": "Get GPU Stats"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Get alert and GPU data\nconst alert = $node[\"Parse Wazuh Alert\"].json;\nconst prometheusResponse = $node[\"Get GPU Stats\"].json;\nconst availableVRAM = parseFloat(prometheusResponse.data.result[0].value[1]);\n\n// Model definitions with VRAM requirements\nconst models = {\nfast: { name: \"huggingfacetb_smollm3-3b\", vram: 2, speed: \"⚡ Fast\", quality: \"Good\" },\nbalanced: { name: \"llama-3.1-8b-instruct\", vram: 5, speed: \"🚀 Balanced\", quality: \"Better\" },\nbest: { name: \"Qwen3-30B-A3B-Q3_K_M\", vram: 14, speed: \"🐌 Thorough\", quality: \"Best\" }\n};\n\n// Severity-based model selection\nconst severity = parseInt(alert.rule_level) || 5;\nlet selectedModel;\n\nif (severity <= 5) {\n// Low severity - use fast model\nselectedModel = models.fast;\n} else if (severity <= 10) {\n// Medium severity - use balanced model\nselectedModel = models.balanced;\n} else {\n// Critical severity - use best model if VRAM available\nif (availableVRAM >= models.best.vram) {\nselectedModel = models.best;\n} else {\n// Fallback to balanced if not enough VRAM\nselectedModel = models.balanced;\n}\n}\n\nreturn [{\njson: {\nalert: alert,\nselected_model: selectedModel.name,\nmodel_metadata: selectedModel,\nvram_available: Math.floor(availableVRAM),\nseverity_level: severity,\nselection_reason: `Level ${severity} alert → ${selectedModel.speed} analysis`\n}\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        464,
+        -672
+      ],
+      "id": "10195dfd-a119-4fbc-9afb-4d1ff84631a3",
+      "name": "Select Model by Severity"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Get all required data\nconst aiResponse = $input.first().json;\nconst alert = $node[\"Build AI Request Data\"].json.alert;\nconst modelData = $node[\"Select Model by Severity\"].json;\n\n// Extract and parse AI analysis\nlet riskScore = \"Unknown\";\nlet riskLevel = \"Unknown\";\nlet category = \"Unknown\";\nlet summary = \"No summary provided\";\nlet recommendations = [];\nlet confidenceScore = null;\n\ntry {\nlet content = aiResponse.choices[0].message.content;\n\n// Aggressive cleaning of AI response\ncontent = content.replace(/<think>[\\s\\S]*?<\\/think>/g, '');  // Remove think tags\ncontent = content.replace(/```json\\s*/g, '');                // Remove ```json\ncontent = content.replace(/```\\s*/g, '');                     // Remove ```\ncontent = content.replace(/^[^{]*/, '');                      // Remove everything before first {\ncontent = content.replace(/[^}]*$/, '');                      // Remove everything after last }\ncontent = content.trim();\n\n// Try to parse JSON\nconst parsed = JSON.parse(content);\n\n// Extract fields with fallbacks\nriskScore = parsed.risk_score !== undefined ? parsed.risk_score : riskScore;\nriskLevel = parsed.risk_level || riskLevel;\ncategory = parsed.category || category;\nsummary = parsed.summary || summary;\nconfidenceScore = parsed.confidence !== undefined ? parsed.confidence : null;\n\n// Extract recommendations array\nif (parsed.recommendations && Array.isArray(parsed.recommendations)) {\nrecommendations = parsed.recommendations;\n}\n\n} catch (e) {\n// If parsing fails completely, extract what we can from text\nsummary = `Parsing error: ${e.message}. Raw content available in execution log.`;\n}\n\n// Format confidence as \"X/10\"\nlet confidenceDisplay = \"Unknown\";\nif (confidenceScore !== null && confidenceScore !== undefined) {\nconst outOf10 = Math.round(confidenceScore * 10);\nconfidenceDisplay = `${outOf10}/10`;\n}\n\n// Format recommendations as bullet list\nlet recommendationsList = \"None provided\";\nif (recommendations.length > 0) {\nrecommendationsList = recommendations.map(r => `• ${r}`).join('\\n');\n}\n\n// Format timestamp in Central US time\nconst eventTime = new Date(alert.timestamp);\nconst formattedTime = eventTime.toLocaleString('en-US', {\nmonth: 'short',\nday: 'numeric',\nyear: 'numeric',\nhour: '2-digit',\nminute: '2-digit',\nsecond: '2-digit',\ntimeZone: 'America/Chicago',\ntimeZoneName: 'short'\n});\n\n// Extract event details\nconst srcIP = alert.data?.srcip || \"Unknown\";\nconst srcPort = alert.data?.srcport || \"N/A\";\nconst dstUser = alert.data?.dstuser || \"N/A\";\nconst agentName = alert.agent_name || alert.agent_name || \"Unknown\";\nconst agentIP = alert.agent_ip || alert.agent_ip || \"Unknown\";\n\n// Build event details section\nlet eventDetails = `**Time:** ${formattedTime}\n**Agent:** ${agentName} (${agentIP})`;\n\n// Add source IP/port if available\nif (srcIP !== \"Unknown\") {\neventDetails += `\\n**Source:** ${srcIP}:${srcPort}`;\n}\n\n// Add destination user if available\nif (dstUser !== \"N/A\") {\neventDetails += `\\n**User:** ${dstUser}`;\n}\n\n// Build the annotation body\nconst annotationBody = {\ntags: [\n\"wazuh-alert\",\n\"ai-analyzed\",\n`severity-${modelData.severity_level}`,\n`model-${modelData.model_metadata.speed.replace(/[^a-zA-Z]/g, '').toLowerCase()}`\n],\ntext: `🚨 **${alert.rule_description}**\n\n**Severity:** Level ${modelData.severity_level}/15\n**Model Used:** ${modelData.model_metadata.quality} (${modelData.selected_model})\n**VRAM Available:** ${modelData.vram_available}GB\n**Selection Reason:** ${modelData.selection_reason}\n**Confidence:** ${confidenceDisplay}\n\n⏰ **Event Details**\n${eventDetails}\n\n📊 **Risk Assessment**\n**Score:** ${riskScore}/100\n**Level:** ${riskLevel}\n**Category:** ${category}\n\n📝 **Summary**\n${summary}\n\n🛡 **Recommended Actions**\n${recommendationsList}`,\ntime: new Date(alert.timestamp).getTime()\n};\n\nreturn [{\njson: {\nannotation_body: annotationBody,\nai_response: aiResponse,\nmetadata: modelData,\nconfidence: confidenceDisplay,\ndebug_parsed: { riskScore, riskLevel, category, summary, recommendations, confidenceScore }\n}\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1280,
+        -720
+      ],
+      "id": "5e867d12-7a6e-4840-a5af-2361010caf87",
+      "name": "Build Grafana Annotation"
+    },
+    {
+      "parameters": {
+        "content": "📋 Main Workflow Overview: Wazuh Security Analyzer - Production (Phase 3C)\n\nContent:\nPURPOSE: AI-powered security alert analysis with intelligent\nmodel selection, error handling, and multi-channel notifications.\n\nNEW FEATURES (PHASE 3C):\n✅ HTTP Request retry with \"Continue On Fail\" (3 attempts)\n✅ Fallback message when AI unavailable\n✅ Slack notifications for critical alerts (severity ≥11)\n✅ Refactored to native n8n nodes where possible\n✅ Error handling with IF node branching\n\nSETUP REQUIREMENTS:\n✅ GPU metrics collector (Prometheus)\n✅ LocalAI with multiple models (3B, 8B, 30B)\n✅ Grafana API credentials\n✅ Slack Bot token with chat:write permissions\n✅ n8n webhook endpoint\n\nWEBHOOK URL:\nhttp://192.168.0.52:5678/webhook/wazuh-alert-dynamic\n\nFLOW:\nParse Alert → Get GPU Stats → Select Model → Build Request\n→ AI Call (with retry) → Build Annotation → Post to Grafana\n→ Check Severity → [If Critical: Slack]\n\nNOTIFICATION LOGIC:\n• ALL alerts → Grafana annotation\n• Severity 11-15 → Slack #security-alerts",
+        "height": 624,
+        "width": 608
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -320,
+        -512
+      ],
+      "typeVersion": 1,
+      "id": "788ea492-d1c4-4a60-8e4a-1e15a5cb3558",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "content": "🔄 Error Handling: AI Call with Retry & Fallback\n\nContent:\nRETRY STRATEGY:\n• HTTP Request node with built-in retry\n• Max attempts: 3\n• \"Continue On Fail\" enabled\n• Fixed retry delay (n8n default)\n\nFALLBACK LOGIC:\n• IF node checks: {{ !$json.error }}\n• Success path: Parse AI analysis\n• Failure path: Use fallback message\n• Fallback message: \"AI analysis unavailable - models offline\"\n\nOUTPUT HANDLING:\n• Success: Structured JSON with risk_score, category, recommendations\n• Failure: Grafana annotation still created with fallback text\n• Both paths merge at \"Build Grafana Annotation\"\n\nERROR DETECTION:\n• Check AI Success (IF node): {{ !$json.error }}\n• True = AI responded successfully\n• False = AI failed, use fallback response",
+        "height": 528,
+        "width": 544
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        544,
+        -480
+      ],
+      "typeVersion": 1,
+      "id": "d07085cb-354d-4981-821f-8cf596880920",
+      "name": "Sticky Note1"
+    },
+    {
+      "parameters": {
+        "content": "🔔 Notification Logic: Multi-Channel Notification Routing\n\nContent:\nSEVERITY THRESHOLDS:\n• 0-5: Informational (Grafana only)\n• 6-10: Medium (Grafana only)\n• 11-15: Critical (Grafana + Slack)\n\nGRAFANA ANNOTATIONS:\n✅ Created for ALL alerts\n✅ Includes AI analysis or fallback message\n✅ Event context (time, agent, source)\n✅ Model metadata (name, VRAM, quality)\n✅ Filterable by severity and model tags\n\nSLACK NOTIFICATIONS:\n✅ Only for severity ≥ 11\n✅ Formatted with emojis and sections\n✅ Posted to #security-alerts channel\n✅ Includes risk score and recommendations\n✅ Links to Grafana for full details\n\nCONDITIONAL ROUTING:\n• IF node: \"Is Critical Alert?\"\n• Condition: {{ $json.alert.rule_level >= 11 }}\n• True → Build Slack Message → Send to Slack\n• False → Workflow ends (Grafana only)",
+        "height": 544,
+        "width": 400
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        1504,
+        -512
+      ],
+      "typeVersion": 1,
+      "id": "8fa71739-9697-4381-aa72-eb49073076d8",
+      "name": "Sticky Note2"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "26e959df-5e69-409f-bf80-f6ff36f5ba47",
+              "leftValue": "={{ $node[\"Select Model by Severity\"].json.severity_level }}",
+              "rightValue": 11,
+              "operator": {
+                "type": "number",
+                "operation": "gte"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1744,
+        -736
+      ],
+      "id": "0ce6a016-2078-46a5-83f4-1deaac461e27",
+      "name": "Is Critical Alert?"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Get data from previous nodes that were actually executed\nconst annotationData = $node[\"Build Grafana Annotation\"].json;\nconst alert = annotationData.alert || $node[\"Build AI Request Data\"].json.alert;\nconst modelData = $node[\"Select Model by Severity\"].json;\n\n// The AI analysis is in the annotation data\nconst aiAnalysisText = annotationData.annotation_body?.text || \"\";\n\n// Parse AI analysis from Build Grafana Annotation output\nlet analysis = {\nrisk_score: annotationData.debug_parsed?.riskScore || \"Unknown\",\nrisk_level: annotationData.debug_parsed?.riskLevel || \"Unknown\",\ncategory: annotationData.debug_parsed?.category || \"Unknown\",\nsummary: annotationData.debug_parsed?.summary || \"Analysis unavailable\",\nrecommendations: annotationData.debug_parsed?.recommendations || [],\nconfidence: annotationData.confidence || \"Unknown\"\n};\n\n// Format timestamp\nconst eventTime = new Date(alert.timestamp);\nconst formattedTime = eventTime.toLocaleString('en-US', {\nmonth: 'short',\nday: 'numeric',\nyear: 'numeric',\nhour: '2-digit',\nminute: '2-digit',\nsecond: '2-digit',\ntimeZone: 'America/Chicago',\ntimeZoneName: 'short'\n});\n\n// Get event details\nconst srcIP = alert.data?.srcip || \"Unknown\";\nconst srcPort = alert.data?.srcport || \"\";\nconst dstUser = alert.data?.dstuser || \"\";\nconst agentName = alert.agent?.name || \"Unknown\";\nconst agentIP = alert.agent?.ip || \"Unknown\";\n\n// Format source info\nconst sourceInfo = srcIP !== \"Unknown\"\n? `${srcIP}${srcPort ? ':' + srcPort : ''}`\n: \"Unknown\";\n\n// Format recommendations\nconst recList = Array.isArray(analysis.recommendations) && analysis.recommendations.length > 0\n? analysis.recommendations.map(r => `• ${r}`).join('\\n')\n: \"• Review alert manually\";\n\n// Determine severity emoji and color\nlet severityEmoji = \"🚨\";\nlet alertColor = \"#ff0000\";\n\nif (modelData.severity_level >= 13) {\nseverityEmoji = \"🔥\";\nalertColor = \"#8B0000\";\n} else if (modelData.severity_level >= 11) {\nseverityEmoji = \"🚨\";\nalertColor = \"#ff0000\";\n}\n\n// Build Slack message blocks\nconst slackMessage = {\nchannel: \"#security-alerts\",\ntext: `${severityEmoji} CRITICAL SECURITY ALERT: ${alert.rule_description}`,\nblocks: [\n{\ntype: \"header\",\ntext: {\ntype: \"plain_text\",\ntext: `${severityEmoji} CRITICAL SECURITY ALERT`,\nemoji: true\n}\n},\n{\ntype: \"section\",\nfields: [\n{\ntype: \"mrkdwn\",\ntext: `*Event:*\\n${alert.rule_description}`\n},\n{\ntype: \"mrkdwn\",\ntext: `*Severity:*\\nLevel ${modelData.severity_level}/15`\n},\n{\ntype: \"mrkdwn\",\ntext: `*Agent:*\\n${agentName} (${agentIP})`\n},\n{\ntype: \"mrkdwn\",\ntext: `*Time:*\\n${formattedTime}`\n}\n]\n},\n{\ntype: \"divider\"\n},\n{\ntype: \"section\",\ntext: {\ntype: \"mrkdwn\",\ntext: `*📊 AI Analysis* (${modelData.model_metadata.quality})\\n*Score:* ${analysis.risk_score}/100 | *Risk:* ${analysis.risk_level} | *Confidence:* ${analysis.confidence}`\n}\n},\n{\ntype: \"section\",\ntext: {\ntype: \"mrkdwn\",\ntext: `*📝 Summary*\\n${analysis.summary}`\n}\n},\n{\ntype: \"section\",\ntext: {\ntype: \"mrkdwn\",\ntext: `*🛡 Recommended Actions*\\n${recList}`\n}\n},\n{\ntype: \"divider\"\n},\n{\ntype: \"context\",\nelements: [\n{\ntype: \"mrkdwn\",\ntext: `*Source:* ${sourceInfo}${dstUser ? ` | *User:* ${dstUser}` : ''} | *Alert ID:* ${alert.alert_id}`\n}\n]\n}\n],\nattachments: [\n{\ncolor: alertColor,\nfallback: `Critical alert: ${alert.rule_description}`\n}\n]\n};\n\nreturn [{\njson: {\nslack_message: slackMessage,\nalert: alert,\nanalysis: analysis\n}\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1984,
+        -752
+      ],
+      "id": "77ae9bd1-0a5c-4961-9182-63f00697580e",
+      "name": "Build Slack Message"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "947309e4-7bc4-43b6-beb9-231e7b0a9358",
+              "leftValue": "={{ $json.error }}",
+              "rightValue": "undefinded",
+              "operator": {
+                "type": "object",
+                "operation": "notExists",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1040,
+        -672
+      ],
+      "id": "640395fc-f401-4c99-9d3a-e918e16540e8",
+      "name": "Check AI Success"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "977e2c4c-0680-4ec9-84e7-96c05283f8ac",
+              "name": "alert_id",
+              "value": "={{ $json.body.id }}",
+              "type": "string"
+            },
+            {
+              "id": "3cdd9a9f-4e48-45da-9a73-08e3f25cc624",
+              "name": "timestamp",
+              "value": "={{ $json.body.timestamp }}",
+              "type": "string"
+            },
+            {
+              "id": "1653c1e3-fd5a-4f34-b209-46724afbfb21",
+              "name": "rule_description",
+              "value": "={{ $json.body.rule.description }}",
+              "type": "string"
+            },
+            {
+              "id": "49676b5c-3ca8-4070-ac7e-84828dc83e4e",
+              "name": "rule_level",
+              "value": "={{ $json.body.rule.level }}",
+              "type": "number"
+            },
+            {
+              "id": "11618e9c-ad0a-4daf-b325-cec87fd1d588",
+              "name": "rule_id",
+              "value": "={{ $json.body.rule.id }}",
+              "type": "string"
+            },
+            {
+              "id": "7078a5ed-812a-4269-9259-1ee2279b5880",
+              "name": "agent_name",
+              "value": "={{ $json.body.agent.name }}",
+              "type": "string"
+            },
+            {
+              "id": "46ec90e4-7826-4081-a1e7-409fb22bfab4",
+              "name": "agent_ip",
+              "value": "={{ $json.body.agent.ip }}",
+              "type": "string"
+            },
+            {
+              "id": "61515340-3b61-4423-9f4d-219bab8cc46c",
+              "name": "agent_id",
+              "value": "={{ $json.body.agent.id }}",
+              "type": "string"
+            },
+            {
+              "id": "867465b2-c88c-43bf-b0ec-474250f87347",
+              "name": "full_log",
+              "value": "={{ $json.body.full_log }}",
+              "type": "string"
+            },
+            {
+              "id": "0e4ca4cd-016f-47f4-82be-2e2e437b0054",
+              "name": "data",
+              "value": "={{ $json.body.data }}",
+              "type": "object"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -80,
+        -688
+      ],
+      "id": "63dab57a-1eb7-464b-a80c-b05a8272933e",
+      "name": "Parse Wazuh Alert"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "b50a2988-dcc7-4956-acc8-7c96d3842ff3",
+              "name": "choices",
+              "value": "={{ [{ message: { content: JSON.stringify({ risk_score: 50, risk_level: \"Medium\", category: \"unknown\", summary: \"AI analysis temporarily unavailable. Manual review required.\", indicators: [\"AI service unavailable\"], recommendations: [\"Review alert manually\", \"Check LocalAI service status\", \"Verify model availability\"], confidence: 0.0 }) } }] }}",
+              "type": "array"
+            },
+            {
+              "id": "5e660759-badc-4aa5-a37d-f04d0f63bb23",
+              "name": "model",
+              "value": "static-fallback",
+              "type": "string"
+            },
+            {
+              "id": "1de95520-165e-4d1c-84c7-67947e177bb9",
+              "name": "ai_failed",
+              "value": true,
+              "type": "boolean"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1248,
+        -576
+      ],
+      "id": "67a59645-1cc6-4e79-bd14-2e33ecc0f1e1",
+      "name": "Create Fallback Response"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Get data from previous nodes\nconst alert = $node[\"Parse Wazuh Alert\"].json;\nconst modelData = $node[\"Select Model by Severity\"].json;\n\n// Build system prompt\nconst systemPrompt = \"You are a cybersecurity analyst. Analyze security alerts and provide structured JSON output.\\n\\nOutput format (JSON only, no markdown):\\n{\\n  \\\"risk_score\\\": 0-100,\\n  \\\"risk_level\\\": \\\"Low|Medium|High|Critical\\\",\\n  \\\"category\\\": \\\"brute_force|malware|dos|exploit|reconnaissance|other\\\",\\n \\\"summary\\\": \\\"Brief description\\\",\\n  \\\"indicators\\\": [\\\"indicator1\\\", \\\"indicator2\\\"],\\n  \\\"recommendations\\\": [\\\"action1\\\", \\\"action2\\\"],\\n  \\\"confidence\\\": 0.0-1.0\\n}\";\n\n// Build user prompt\nconst userPrompt = `Analyze this security alert:\n\n**Event:** ${alert.rule_description}\n**Severity:** ${alert.rule_level}/15\n**Agent:** ${alert.agent_name} (${alert.agent_ip})\n**Time:** ${alert.timestamp}\n**Details:** ${alert.full_log}\n\n**Analysis Model:** ${modelData.model_metadata.quality} quality\n\nProvide structured JSON analysis.`;\n\n// Build request body\nconst requestBody = {\nmodel: modelData.selected_model,\nmessages: [\n{ role: \"system\", content: systemPrompt },\n{ role: \"user\", content: userPrompt }\n],\ntemperature: 0.3,\nmax_tokens: 300\n};\n\nreturn [{\njson: {\n...modelData,\nalert: alert,\nsystem_prompt: systemPrompt,\nuser_prompt: userPrompt,\nrequest_body: requestBody\n}\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        672,
+        -672
+      ],
+      "id": "e824a3d9-2701-481e-b6e3-dda1f36f1d55",
+      "name": "Build AI Request Data"
+    },
+    {
+      "parameters": {
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "value": "C0A3RQQR45C",
+          "mode": "list",
+          "cachedResultName": "security-alerts"
+        },
+        "messageType": "block",
+        "blocksUi": "={{ JSON.stringify($json.slack_message.blocks) }}",
+        "text": "={{ $json.slack_message.text }}",
+        "otherOptions": {}
+      },
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.4,
+      "position": [
+        2208,
+        -736
+      ],
+      "id": "3e17f16d-f32d-4ae2-a0e9-65fcc6dbd88f",
+      "name": "Send Slack to Security Alerts Channel",
+      "webhookId": "45e1640f-1d7d-4511-88ba-3bc3f3714c64",
+      "credentials": {
+        "slackApi": {
+          "id": "kUjWk37OnSdHwqVR",
+          "name": "Slack - Security Alerts"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Parse Wazuh Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call LocalAI": {
+      "main": [
+        [
+          {
+            "node": "Check AI Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get GPU Stats": {
+      "main": [
+        [
+          {
+            "node": "Select Model by Severity",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Select Model by Severity": {
+      "main": [
+        [
+          {
+            "node": "Build AI Request Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Grafana Annotation": {
+      "main": [
+        [
+          {
+            "node": "Create Grafana Annotation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Critical Alert?": {
+      "main": [
+        [
+          {
+            "node": "Build Slack Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Slack Message": {
+      "main": [
+        [
+          {
+            "node": "Send Slack to Security Alerts Channel",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Grafana Annotation": {
+      "main": [
+        [
+          {
+            "node": "Is Critical Alert?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check AI Success": {
+      "main": [
+        [
+          {
+            "node": "Build Grafana Annotation",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Create Fallback Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build AI Request Data": {
+      "main": [
+        [
+          {
+            "node": "Call LocalAI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Wazuh Alert": {
+      "main": [
+        [
+          {
+            "node": "Get GPU Stats",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "3af28f82-cd55-4534-aae5-ba55a8cefc79",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "94eeddc04165ddcbf27192c9290117cde83c0b529aaab68ac4c23173f2841784"
+  },
+  "id": "0ZTqhz2Zb9Pb6oOb",
+  "tags": []
+}
