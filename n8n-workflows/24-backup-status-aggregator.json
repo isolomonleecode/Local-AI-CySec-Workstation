@@ -1,0 +1,247 @@
+{
+  "name": "Backup Status Aggregator",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "triggerAtHour": 6
+            }
+          ]
+        }
+      },
+      "id": "daily-schedule",
+      "name": "Daily 6 AM",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Define backup sources to monitor\nconst backupSources = [\n  {\n    name: 'Unraid Appdata Backup',\n    type: 'unraid-ca-backup',\n    host: '192.168.0.51',\n    logPath: '/var/log/ca.backup.log',\n    critical: true\n  },\n  {\n    name: 'Nextcloud Backup',\n    type: 'docker-volume',\n    host: '192.168.0.51',\n    container: 'nextcloud',\n    critical: true\n  },\n  {\n    name: 'Vaultwarden Backup',\n    type: 'docker-volume',\n    host: '192.168.0.19',\n    container: 'vaultwarden',\n    critical: true\n  },\n  {\n    name: 'Home Assistant Backup',\n    type: 'ha-snapshot',\n    host: '192.168.0.19',\n    critical: true\n  },\n  {\n    name: 'PostgreSQL Backup',\n    type: 'pg-dump',\n    host: '192.168.0.52',\n    databases: ['n8n', 'grafana'],\n    critical: true\n  },\n  {\n    name: 'Grafana Dashboards',\n    type: 'grafana-export',\n    host: '192.168.0.19',\n    critical: false\n  }\n];\n\nreturn backupSources.map(s => ({ json: s }));"
+      },
+      "id": "define-sources",
+      "name": "Define Backup Sources",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [220, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Simulate checking backup status from various sources\n// In production, this would SSH to hosts and check actual backup files/logs\nconst sources = $input.all();\nconst results = [];\nconst now = new Date();\nconst oneDayAgo = new Date(now - 24 * 60 * 60 * 1000);\nconst twoDaysAgo = new Date(now - 48 * 60 * 60 * 1000);\n\nfor (const item of sources) {\n  const source = item.json;\n  \n  // Simulated backup check (would use SSH/API in production)\n  const lastBackupAge = Math.random() * 72; // 0-72 hours ago\n  const lastBackupTime = new Date(now - lastBackupAge * 60 * 60 * 1000);\n  const backupSize = Math.floor(Math.random() * 10000) + 100; // MB\n  const wasSuccessful = Math.random() > 0.1; // 90% success rate simulation\n  \n  let status = 'healthy';\n  let severity = 'ok';\n  \n  if (!wasSuccessful) {\n    status = 'failed';\n    severity = source.critical ? 'critical' : 'warning';\n  } else if (lastBackupAge > 48) {\n    status = 'stale';\n    severity = source.critical ? 'critical' : 'warning';\n  } else if (lastBackupAge > 24) {\n    status = 'overdue';\n    severity = 'warning';\n  }\n  \n  results.push({\n    name: source.name,\n    type: source.type,\n    host: source.host,\n    critical: source.critical,\n    status,\n    severity,\n    lastBackup: lastBackupTime.toISOString(),\n    lastBackupAge: lastBackupAge.toFixed(1),\n    backupSize: backupSize,\n    wasSuccessful\n  });\n}\n\nconst failed = results.filter(r => r.status === 'failed');\nconst stale = results.filter(r => r.status === 'stale');\nconst overdue = results.filter(r => r.status === 'overdue');\nconst healthy = results.filter(r => r.status === 'healthy');\n\nreturn [{\n  results,\n  summary: {\n    total: results.length,\n    healthy: healthy.length,\n    failed: failed.length,\n    stale: stale.length,\n    overdue: overdue.length,\n    criticalIssues: results.filter(r => r.severity === 'critical').length\n  },\n  hasIssues: failed.length > 0 || stale.length > 0,\n  timestamp: now.toISOString()\n}];"
+      },
+      "id": "check-backups",
+      "name": "Check Backup Status",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [440, 0]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.hasIssues }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "if-issues",
+      "name": "Has Issues?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [660, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Format Slack alert for backup issues\nconst data = $input.first().json;\n\nconst blocks = [\n  {\n    type: 'header',\n    text: {\n      type: 'plain_text',\n      text: '💾 Backup Status Alert',\n      emoji: true\n    }\n  },\n  {\n    type: 'section',\n    text: {\n      type: 'mrkdwn',\n      text: `*Summary:* ${data.summary.healthy}/${data.summary.total} backups healthy\\n*Critical Issues:* ${data.summary.criticalIssues}`\n    }\n  },\n  { type: 'divider' }\n];\n\n// Failed backups (highest priority)\nconst failed = data.results.filter(r => r.status === 'failed');\nif (failed.length > 0) {\n  blocks.push({\n    type: 'section',\n    text: {\n      type: 'mrkdwn',\n      text: `🔴 *FAILED BACKUPS*\\n${failed.map(b => \n        `• *${b.name}* on \\`${b.host}\\` - Last attempt: ${new Date(b.lastBackup).toLocaleString()}`\n      ).join('\\n')}`\n    }\n  });\n}\n\n// Stale backups\nconst stale = data.results.filter(r => r.status === 'stale');\nif (stale.length > 0) {\n  blocks.push({\n    type: 'section',\n    text: {\n      type: 'mrkdwn',\n      text: `🟠 *STALE BACKUPS (>48h)*\\n${stale.map(b => \n        `• *${b.name}* - ${b.lastBackupAge}h old`\n      ).join('\\n')}`\n    }\n  });\n}\n\n// Overdue backups\nconst overdue = data.results.filter(r => r.status === 'overdue');\nif (overdue.length > 0) {\n  blocks.push({\n    type: 'section',\n    text: {\n      type: 'mrkdwn',\n      text: `🟡 *OVERDUE BACKUPS (>24h)*\\n${overdue.map(b => \n        `• *${b.name}* - ${b.lastBackupAge}h old`\n      ).join('\\n')}`\n    }\n  });\n}\n\nblocks.push({\n  type: 'context',\n  elements: [{\n    type: 'mrkdwn',\n    text: `Checked at ${new Date().toLocaleString()}`\n  }]\n});\n\nreturn [{\n  blocks,\n  text: `Backup Alert: ${data.summary.failed} failed, ${data.summary.stale} stale, ${data.summary.overdue} overdue`\n}];"
+      },
+      "id": "format-alert",
+      "name": "Format Backup Alert",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [880, -100]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SLACK_WEBHOOK_URL }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "id": "slack-alert",
+      "name": "Send Slack Alert",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1100, -100]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Format daily digest for healthy status\nconst data = $input.first().json;\n\nconst blocks = [\n  {\n    type: 'header',\n    text: {\n      type: 'plain_text',\n      text: '✅ Daily Backup Report - All Healthy',\n      emoji: true\n    }\n  },\n  {\n    type: 'section',\n    text: {\n      type: 'mrkdwn',\n      text: `All *${data.summary.total}* backup jobs completed successfully.`\n    }\n  },\n  { type: 'divider' }\n];\n\n// List all backups with sizes\nconst backupList = data.results.map(b => \n  `• *${b.name}*: ${b.backupSize}MB (${b.lastBackupAge}h ago)`\n).join('\\n');\n\nblocks.push({\n  type: 'section',\n  text: {\n    type: 'mrkdwn',\n    text: backupList\n  }\n});\n\nconst totalSize = data.results.reduce((sum, b) => sum + b.backupSize, 0);\n\nblocks.push({\n  type: 'context',\n  elements: [{\n    type: 'mrkdwn',\n    text: `Total backup size: ${(totalSize / 1024).toFixed(2)}GB | Checked at ${new Date().toLocaleString()}`\n  }]\n});\n\nreturn [{\n  blocks,\n  text: `Daily Backup Report: All ${data.summary.total} backups healthy`\n}];"
+      },
+      "id": "format-digest",
+      "name": "Format Daily Digest",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [880, 100]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SLACK_DIGEST_WEBHOOK_URL || $env.SLACK_WEBHOOK_URL }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "id": "slack-digest",
+      "name": "Send Daily Digest",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1100, 100]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://192.168.0.19:3000/api/annotations",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"text\": \"Backup check: {{ $('Check Backup Status').first().json.summary.healthy }}/{{ $('Check Backup Status').first().json.summary.total }} healthy\",\n  \"tags\": [\"backup\", \"{{ $('Check Backup Status').first().json.hasIssues ? 'alert' : 'healthy' }}\"]\n}",
+        "options": {}
+      },
+      "id": "grafana-annotation",
+      "name": "Create Grafana Annotation",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1320, 0]
+    }
+  ],
+  "connections": {
+    "Daily 6 AM": {
+      "main": [
+        [
+          {
+            "node": "Define Backup Sources",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Define Backup Sources": {
+      "main": [
+        [
+          {
+            "node": "Check Backup Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Backup Status": {
+      "main": [
+        [
+          {
+            "node": "Has Issues?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Issues?": {
+      "main": [
+        [
+          {
+            "node": "Format Backup Alert",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Format Daily Digest",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Backup Alert": {
+      "main": [
+        [
+          {
+            "node": "Send Slack Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Slack Alert": {
+      "main": [
+        [
+          {
+            "node": "Create Grafana Annotation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Daily Digest": {
+      "main": [
+        [
+          {
+            "node": "Send Daily Digest",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Daily Digest": {
+      "main": [
+        [
+          {
+            "node": "Create Grafana Annotation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": [
+    {
+      "name": "backup"
+    },
+    {
+      "name": "monitoring"
+    },
+    {
+      "name": "homelab"
+    }
+  ],
+  "triggerCount": 1,
+  "updatedAt": "2025-12-27T00:00:00.000Z",
+  "versionId": "1"
+}

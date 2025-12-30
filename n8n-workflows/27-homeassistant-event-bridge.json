@@ -1,0 +1,262 @@
+{
+  "name": "Home Assistant Event Bridge",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "ha-event",
+        "options": {}
+      },
+      "id": "ha-webhook",
+      "name": "Home Assistant Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [0, 0],
+      "webhookId": "ha-event"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse and categorize Home Assistant event\nconst event = $input.first().json;\n\n// Extract common fields\nconst parsed = {\n  eventType: event.event_type || event.trigger?.platform || 'unknown',\n  entityId: event.entity_id || event.trigger?.entity_id || null,\n  domain: null,\n  state: event.new_state?.state || event.state || null,\n  oldState: event.old_state?.state || null,\n  attributes: event.new_state?.attributes || event.attributes || {},\n  timestamp: event.time_fired || new Date().toISOString(),\n  raw: event\n};\n\n// Extract domain from entity_id\nif (parsed.entityId) {\n  parsed.domain = parsed.entityId.split('.')[0];\n}\n\n// Categorize the event\nlet category = 'other';\nlet priority = 'low';\nlet shouldNotify = false;\n\nswitch (parsed.domain) {\n  case 'alarm_control_panel':\n    category = 'security';\n    priority = parsed.state === 'triggered' ? 'critical' : \n               parsed.state === 'armed_away' ? 'medium' : 'low';\n    shouldNotify = parsed.state === 'triggered' || parsed.state === 'armed_away' || parsed.state === 'disarmed';\n    break;\n    \n  case 'binary_sensor':\n    if (parsed.entityId?.includes('motion') || parsed.entityId?.includes('presence')) {\n      category = 'motion';\n    } else if (parsed.entityId?.includes('door') || parsed.entityId?.includes('window')) {\n      category = 'security';\n      shouldNotify = parsed.state === 'on' && parsed.oldState === 'off';\n    } else if (parsed.entityId?.includes('smoke') || parsed.entityId?.includes('co2')) {\n      category = 'safety';\n      priority = 'critical';\n      shouldNotify = parsed.state === 'on';\n    }\n    break;\n    \n  case 'lock':\n    category = 'security';\n    shouldNotify = true;\n    priority = parsed.state === 'unlocked' ? 'medium' : 'low';\n    break;\n    \n  case 'camera':\n    category = 'security';\n    break;\n    \n  case 'climate':\n    category = 'hvac';\n    break;\n    \n  case 'light':\n  case 'switch':\n    category = 'automation';\n    break;\n    \n  case 'sensor':\n    if (parsed.entityId?.includes('temperature') || parsed.entityId?.includes('humidity')) {\n      category = 'environment';\n    } else if (parsed.entityId?.includes('power') || parsed.entityId?.includes('energy')) {\n      category = 'energy';\n    }\n    break;\n    \n  case 'automation':\n    category = 'automation';\n    shouldNotify = parsed.state === 'triggered';\n    break;\n}\n\n// Check for state change\nconst stateChanged = parsed.state !== parsed.oldState;\n\nreturn [{\n  ...parsed,\n  category,\n  priority,\n  shouldNotify,\n  stateChanged,\n  friendlyName: parsed.attributes.friendly_name || parsed.entityId\n}];"
+      },
+      "id": "parse-event",
+      "name": "Parse HA Event",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [220, 0]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.priority }}",
+              "operation": "equals",
+              "value2": "critical"
+            }
+          ]
+        }
+      },
+      "id": "is-critical",
+      "name": "Is Critical?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [440, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Format critical alert for immediate notification\nconst event = $input.first().json;\n\nconst categoryEmoji = {\n  security: '🔐',\n  safety: '🚨',\n  motion: '👀',\n  hvac: '🌡️',\n  automation: '⚡',\n  environment: '🌍',\n  energy: '⚡',\n  other: '📡'\n};\n\nconst emoji = categoryEmoji[event.category] || '📡';\n\nconst blocks = [\n  {\n    type: 'header',\n    text: {\n      type: 'plain_text',\n      text: `${emoji} CRITICAL: Home Assistant Alert`,\n      emoji: true\n    }\n  },\n  {\n    type: 'section',\n    text: {\n      type: 'mrkdwn',\n      text: `*${event.friendlyName}*\\n• State: \\`${event.oldState}\\` → \\`${event.state}\\`\\n• Category: ${event.category}\\n• Entity: \\`${event.entityId}\\``\n    }\n  },\n  {\n    type: 'context',\n    elements: [{\n      type: 'mrkdwn',\n      text: `Triggered at ${new Date(event.timestamp).toLocaleString()}`\n    }]\n  }\n];\n\nreturn [{\n  blocks,\n  text: `CRITICAL: ${event.friendlyName} - ${event.state}`\n}];"
+      },
+      "id": "format-critical",
+      "name": "Format Critical Alert",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [660, -100]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SLACK_WEBHOOK_URL }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "id": "slack-critical",
+      "name": "Send Critical Alert",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [880, -100]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.shouldNotify }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "should-notify",
+      "name": "Should Notify?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [660, 100]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Format non-critical notification\nconst event = $input.first().json;\n\nconst categoryEmoji = {\n  security: '🔐',\n  safety: '🚨',\n  motion: '👀',\n  hvac: '🌡️',\n  automation: '⚡',\n  environment: '🌍',\n  energy: '⚡',\n  other: '📡'\n};\n\nconst emoji = categoryEmoji[event.category] || '📡';\n\nconst blocks = [\n  {\n    type: 'section',\n    text: {\n      type: 'mrkdwn',\n      text: `${emoji} *${event.friendlyName}*: \\`${event.oldState}\\` → \\`${event.state}\\``\n    }\n  },\n  {\n    type: 'context',\n    elements: [{\n      type: 'mrkdwn',\n      text: `${event.category} | ${new Date(event.timestamp).toLocaleTimeString()}`\n    }]\n  }\n];\n\nreturn [{\n  blocks,\n  text: `${event.friendlyName}: ${event.state}`\n}];"
+      },
+      "id": "format-notification",
+      "name": "Format Notification",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [880, 50]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SLACK_DIGEST_WEBHOOK_URL || $env.SLACK_WEBHOOK_URL }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "id": "slack-notify",
+      "name": "Send Notification",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1100, 50]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Log event for analytics without notification\nconst event = $input.first().json;\n\n// Store in static data for aggregation\nconst staticData = $getWorkflowStaticData('global');\nif (!staticData.eventLog) staticData.eventLog = [];\n\nstaticData.eventLog.push({\n  timestamp: event.timestamp,\n  entityId: event.entityId,\n  category: event.category,\n  state: event.state\n});\n\n// Keep only last 1000 events\nif (staticData.eventLog.length > 1000) {\n  staticData.eventLog = staticData.eventLog.slice(-1000);\n}\n\nreturn [{\n  message: 'Event logged (no notification)',\n  entityId: event.entityId,\n  category: event.category\n}];"
+      },
+      "id": "log-event",
+      "name": "Log Event Only",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [880, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://192.168.0.19:3000/api/annotations",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"text\": \"HA Critical: {{ $('Parse HA Event').first().json.friendlyName }} - {{ $('Parse HA Event').first().json.state }}\",\n  \"tags\": [\"homeassistant\", \"critical\", \"{{ $('Parse HA Event').first().json.category }}\"]\n}",
+        "options": {}
+      },
+      "id": "grafana-annotation",
+      "name": "Create Grafana Annotation",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1100, -100]
+    }
+  ],
+  "connections": {
+    "Home Assistant Webhook": {
+      "main": [
+        [
+          {
+            "node": "Parse HA Event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse HA Event": {
+      "main": [
+        [
+          {
+            "node": "Is Critical?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Critical?": {
+      "main": [
+        [
+          {
+            "node": "Format Critical Alert",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Should Notify?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Critical Alert": {
+      "main": [
+        [
+          {
+            "node": "Send Critical Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Critical Alert": {
+      "main": [
+        [
+          {
+            "node": "Create Grafana Annotation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Should Notify?": {
+      "main": [
+        [
+          {
+            "node": "Format Notification",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log Event Only",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Notification": {
+      "main": [
+        [
+          {
+            "node": "Send Notification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": {
+    "global": {
+      "eventLog": []
+    }
+  },
+  "tags": [
+    {
+      "name": "homeassistant"
+    },
+    {
+      "name": "automation"
+    },
+    {
+      "name": "homelab"
+    }
+  ],
+  "triggerCount": 1,
+  "updatedAt": "2025-12-27T00:00:00.000Z",
+  "versionId": "1"
+}

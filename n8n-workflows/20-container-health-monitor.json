@@ -1,0 +1,285 @@
+{
+  "name": "Container Health Monitor",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 5
+            }
+          ]
+        }
+      },
+      "id": "schedule-trigger",
+      "name": "Every 5 Minutes",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "http://192.168.0.19:9090/api/v1/query",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "query",
+              "value": "container_last_seen{job=\"cadvisor\"}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "prometheus-sweetrpi",
+      "name": "Query Container Status",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [220, -100],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "http://192.168.0.19:9090/api/v1/query",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "query",
+              "value": "changes(container_start_time_seconds[5m]) > 0"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "prometheus-restarts",
+      "name": "Query Container Restarts",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [220, 100],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Analyze container health data\n// Get data directly from previous nodes (no Merge node needed)\nconst containerData = $('Query Container Status').first().json || {};\nconst restartData = $('Query Container Restarts').first().json || {};\n\n// Alert cooldown mechanism - prevents spamming for same container\nconst staticData = $getWorkflowStaticData('global');\nif (!staticData.recentAlerts) staticData.recentAlerts = {};\nconst now = Date.now();\nconst ALERT_COOLDOWN = 30 * 60 * 1000; // 30 minutes between alerts for same container\n\n// Clean up old entries\nfor (const [key, time] of Object.entries(staticData.recentAlerts)) {\n  if (now - time > ALERT_COOLDOWN) {\n    delete staticData.recentAlerts[key];\n  }\n}\n\nconst results = {\n  timestamp: new Date().toISOString(),\n  healthy: [],\n  unhealthy: [],\n  restarted: [],\n  alerts: []\n};\n\n// Check if API returned error\nconst apiError = containerData?.error || restartData?.error;\nif (apiError) {\n  results.summary = {\n    totalHealthy: 0,\n    totalRestarted: 0,\n    hasAlerts: false,\n    apiError: true\n  };\n  return [results];\n}\n\n// Process container data\nif (containerData?.data?.result) {\n  for (const metric of containerData.data.result) {\n    const name = metric.metric?.name || metric.metric?.container_label_com_docker_compose_service || 'unknown';\n    const instance = metric.metric?.instance || 'unknown';\n    results.healthy.push({ name, instance });\n  }\n}\n\n// Process restart data - only alert if multiple restarts (filters out normal stops/starts)\nif (restartData?.data?.result && restartData.data.result.length > 0) {\n  for (const metric of restartData.data.result) {\n    const name = metric.metric?.name || metric.metric?.container_label_com_docker_compose_service || 'unknown';\n    const restarts = parseInt(metric.value?.[1]) || 0;\n    \n    // Only count if there were actual restart events (> 1 change indicates crash loop)\n    if (restarts > 1) {\n      results.restarted.push({ name, restarts });\n      \n      // Check cooldown - don't spam alerts for same container\n      const alertKey = `restart_${name}`;\n      if (!staticData.recentAlerts[alertKey]) {\n        results.alerts.push({\n          severity: restarts > 3 ? 'critical' : 'warning',\n          message: `Container ${name} restarted ${restarts} time(s) in last 5 minutes`\n        });\n        staticData.recentAlerts[alertKey] = now;\n      }\n    }\n  }\n}\n\nresults.summary = {\n  totalHealthy: results.healthy.length,\n  totalRestarted: results.restarted.length,\n  hasAlerts: results.alerts.length > 0\n};\n\nreturn [results];"
+      },
+      "id": "analyze-health",
+      "name": "Analyze Health Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [500, 0]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "alert-count-check",
+              "leftValue": "={{ $json.alerts.length }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-alerts",
+      "name": "Has Alerts?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [720, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Format Slack message for container alerts\nconst data = $input.first().json;\n\n// Use configured timezone\nconst tz = $env.TIMEZONE || 'America/Chicago';\nconst timeStr = new Date().toLocaleString('en-US', { timeZone: tz, dateStyle: 'short', timeStyle: 'short' });\n\nconst blocks = [\n  {\n    type: 'header',\n    text: {\n      type: 'plain_text',\n      text: '🐳 Container Health Alert',\n      emoji: true\n    }\n  },\n  {\n    type: 'section',\n    text: {\n      type: 'mrkdwn',\n      text: `*Time:* ${timeStr}`\n    }\n  }\n];\n\n// Add alerts\nfor (const alert of data.alerts) {\n  const emoji = alert.severity === 'critical' ? '🔴' : '🟡';\n  blocks.push({\n    type: 'section',\n    text: {\n      type: 'mrkdwn',\n      text: `${emoji} *${alert.severity.toUpperCase()}*: ${alert.message}`\n    }\n  });\n}\n\n// Add summary\nblocks.push({\n  type: 'context',\n  elements: [\n    {\n      type: 'mrkdwn',\n      text: `Healthy containers: ${data.summary.totalHealthy} | Restarted: ${data.summary.totalRestarted}`\n    }\n  ]\n});\n\nreturn [{\n  blocks: blocks,\n  text: `Container Alert: ${data.alerts.length} issue(s) detected`\n}];"
+      },
+      "id": "format-slack",
+      "name": "Format Slack Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [940, -100]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SLACK_WEBHOOK_URL }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "id": "slack-notify",
+      "name": "Send Slack Alert",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1160, -100]
+    },
+    {
+      "parameters": {},
+      "id": "no-op",
+      "name": "No Alerts - Continue",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [940, 100]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Format alert for AI Operations Assistant\nconst slackData = $input.first().json;\nconst analysisData = $('Analyze Health Data').first().json;\n\n// Build standardized alert payload\nconst alertPayload = {\n  source: 'container-health-monitor',\n  alert_type: 'container_restart',\n  severity: analysisData.alerts.some(a => a.severity === 'critical') ? 'critical' : 'warning',\n  title: `Container Health Alert: ${analysisData.alerts.length} issue(s)`,\n  message: analysisData.alerts.map(a => a.message).join('; '),\n  context: {\n    containers_restarted: analysisData.restarted.map(r => r.name),\n    restart_counts: analysisData.restarted.reduce((acc, r) => { acc[r.name] = r.restarts; return acc; }, {}),\n    total_healthy: analysisData.summary.totalHealthy,\n    host: 'sweetrpi-desktop'\n  },\n  timestamp: new Date().toISOString(),\n  original_alert: analysisData\n};\n\nreturn [alertPayload];"
+      },
+      "id": "format-ai-alert",
+      "name": "Format AI Alert",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1380, -100]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://192.168.0.52:5678/webhook/ai-ops-triage",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "forward-ai-ops",
+      "name": "Forward to AI Triage",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1600, -100],
+      "continueOnFail": true
+    }
+  ],
+  "connections": {
+    "Every 5 Minutes": {
+      "main": [
+        [
+          {
+            "node": "Query Container Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Query Container Status": {
+      "main": [
+        [
+          {
+            "node": "Query Container Restarts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Query Container Restarts": {
+      "main": [
+        [
+          {
+            "node": "Analyze Health Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Analyze Health Data": {
+      "main": [
+        [
+          {
+            "node": "Has Alerts?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Alerts?": {
+      "main": [
+        [
+          {
+            "node": "Format Slack Message",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "No Alerts - Continue",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Slack Message": {
+      "main": [
+        [
+          {
+            "node": "Send Slack Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Slack Alert": {
+      "main": [
+        [
+          {
+            "node": "Format AI Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format AI Alert": {
+      "main": [
+        [
+          {
+            "node": "Forward to AI Triage",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [
+    {
+      "name": "monitoring"
+    },
+    {
+      "name": "containers"
+    },
+    {
+      "name": "homelab"
+    }
+  ],
+  "triggerCount": 1,
+  "updatedAt": "2025-12-29T00:00:00.000Z",
+  "versionId": "3"
+}

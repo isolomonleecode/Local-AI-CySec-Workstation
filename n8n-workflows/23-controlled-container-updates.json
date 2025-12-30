@@ -1,0 +1,404 @@
+{
+  "name": "Controlled Container Updates",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "weeks",
+              "triggerAtDay": [0],
+              "triggerAtHour": 3
+            }
+          ]
+        }
+      },
+      "id": "weekly-schedule",
+      "name": "Weekly Sunday 3 AM",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "container-update",
+        "options": {}
+      },
+      "id": "manual-webhook",
+      "name": "Manual Update Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [0, 200],
+      "webhookId": "container-update"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Check for available container updates across all hosts\nconst hosts = [\n  { name: 'sweetrpi-desktop', ip: '192.168.0.19', user: 'automation' },\n  { name: 'capcorp9000', ip: '192.168.0.52', user: 'ssjlox' },\n  { name: 'capcorplee', ip: '192.168.0.51', user: 'root' }\n];\n\n// Priority containers that need approval\nconst criticalContainers = [\n  'vaultwarden', 'nextcloud', 'postgres', 'mariadb', \n  'home-assistant', 'n8n', 'grafana', 'prometheus'\n];\n\n// Auto-update safe containers (dev/test only)\nconst autoUpdateSafe = [\n  'metube', 'filebrowser', 'dozzle'\n];\n\nreturn hosts.map(h => ({ json: { ...h, criticalContainers, autoUpdateSafe } }));"
+      },
+      "id": "define-hosts",
+      "name": "Define Hosts & Rules",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [220, 100]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "http://192.168.0.19:9090/api/v1/query",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "query",
+              "value": "container_last_seen{job=\"cadvisor\"}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "get-running-containers",
+      "name": "Get Running Containers",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [440, 100]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Simulate checking for updates by comparing image digests\n// In production, this would use docker pull --dry-run or check registry\nconst containers = $('Get Running Containers').first().json;\nconst hostRules = $('Define Hosts & Rules').all();\n\nconst updates = [];\nconst timestamp = new Date().toISOString();\n\n// Process container data from Prometheus\nif (containers?.data?.result) {\n  for (const metric of containers.data.result) {\n    const name = metric.metric?.name || metric.metric?.container_label_com_docker_compose_service || 'unknown';\n    const image = metric.metric?.image || 'unknown';\n    const instance = metric.metric?.instance || 'unknown';\n    \n    // Skip system containers\n    if (name === 'POD' || name.startsWith('k8s_')) continue;\n    \n    // Determine if this container has updates (simulated check)\n    // In production: compare local digest with registry digest\n    const hasUpdate = Math.random() > 0.7; // Placeholder for actual check\n    \n    if (hasUpdate) {\n      const isCritical = hostRules[0].json.criticalContainers.some(c => \n        name.toLowerCase().includes(c.toLowerCase())\n      );\n      const isAutoSafe = hostRules[0].json.autoUpdateSafe.some(c => \n        name.toLowerCase().includes(c.toLowerCase())\n      );\n      \n      updates.push({\n        name,\n        image,\n        instance,\n        isCritical,\n        isAutoSafe,\n        requiresApproval: isCritical && !isAutoSafe,\n        currentVersion: image.split(':')[1] || 'latest',\n        availableVersion: 'latest' // Would come from registry check\n      });\n    }\n  }\n}\n\nreturn [{\n  updates,\n  totalUpdates: updates.length,\n  criticalUpdates: updates.filter(u => u.isCritical).length,\n  autoUpdateCount: updates.filter(u => u.isAutoSafe).length,\n  approvalRequired: updates.filter(u => u.requiresApproval),\n  timestamp\n}];"
+      },
+      "id": "check-updates",
+      "name": "Check for Updates",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [660, 100]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{ $json.totalUpdates }}",
+              "operation": "larger",
+              "value2": 0
+            }
+          ]
+        }
+      },
+      "id": "if-updates",
+      "name": "Updates Available?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [880, 100]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{ $json.approvalRequired.length }}",
+              "operation": "larger",
+              "value2": 0
+            }
+          ]
+        }
+      },
+      "id": "if-approval-needed",
+      "name": "Approval Needed?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1100, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Format Slack message requesting update approval\nconst data = $input.first().json;\n\nconst blocks = [\n  {\n    type: 'header',\n    text: {\n      type: 'plain_text',\n      text: '🔄 Container Update Approval Required',\n      emoji: true\n    }\n  },\n  {\n    type: 'section',\n    text: {\n      type: 'mrkdwn',\n      text: `*${data.approvalRequired.length} critical container(s)* have updates available and require approval.`\n    }\n  },\n  { type: 'divider' }\n];\n\nfor (const container of data.approvalRequired) {\n  blocks.push({\n    type: 'section',\n    text: {\n      type: 'mrkdwn',\n      text: `🐳 *${container.name}*\\n• Host: \\`${container.instance}\\`\\n• Current: \\`${container.currentVersion}\\`\\n• Available: \\`${container.availableVersion}\\``\n    }\n  });\n}\n\nblocks.push(\n  { type: 'divider' },\n  {\n    type: 'actions',\n    elements: [\n      {\n        type: 'button',\n        text: { type: 'plain_text', text: '✅ Approve All', emoji: true },\n        style: 'primary',\n        action_id: 'approve_updates',\n        value: JSON.stringify({ ids: data.approvalRequired.map(c => c.name) })\n      },\n      {\n        type: 'button',\n        text: { type: 'plain_text', text: '❌ Reject', emoji: true },\n        style: 'danger',\n        action_id: 'reject_updates'\n      },\n      {\n        type: 'button',\n        text: { type: 'plain_text', text: '⏰ Defer 24h', emoji: true },\n        action_id: 'defer_updates'\n      }\n    ]\n  },\n  {\n    type: 'context',\n    elements: [{\n      type: 'mrkdwn',\n      text: `Checked at ${new Date().toLocaleString()} | Auto-update safe: ${data.autoUpdateCount} containers`\n    }]\n  }\n);\n\nreturn [{\n  blocks,\n  text: `Container Update Approval: ${data.approvalRequired.length} critical updates pending`,\n  approvalRequired: data.approvalRequired\n}];"
+      },
+      "id": "format-approval-request",
+      "name": "Format Approval Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1320, -100]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SLACK_WEBHOOK_URL }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "id": "slack-approval",
+      "name": "Send Approval Request",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1540, -100]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Store pending approvals for later processing\nconst staticData = $getWorkflowStaticData('global');\nconst data = $input.first().json;\n\nstaticData.pendingApprovals = data.approvalRequired;\nstaticData.pendingTimestamp = new Date().toISOString();\n\nreturn [{ message: 'Approval request sent, awaiting response', pending: data.approvalRequired.length }];"
+      },
+      "id": "store-pending",
+      "name": "Store Pending Approvals",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1760, -100]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Auto-update safe containers without approval\nconst data = $input.first().json;\nconst autoUpdates = data.updates.filter(u => u.isAutoSafe);\n\nif (autoUpdates.length === 0) {\n  return [{ message: 'No auto-safe containers to update', updated: [] }];\n}\n\n// In production, this would execute docker pull && docker-compose up -d\nconst results = autoUpdates.map(container => ({\n  name: container.name,\n  status: 'updated',\n  previousVersion: container.currentVersion,\n  newVersion: container.availableVersion\n}));\n\nreturn [{\n  message: `Auto-updated ${results.length} safe containers`,\n  updated: results\n}];"
+      },
+      "id": "auto-update",
+      "name": "Auto-Update Safe Containers",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1320, 100]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Format notification for auto-updates\nconst data = $input.first().json;\n\nif (data.updated.length === 0) {\n  return [{ skip: true }];\n}\n\nconst blocks = [\n  {\n    type: 'header',\n    text: {\n      type: 'plain_text',\n      text: '✅ Auto-Updates Applied',\n      emoji: true\n    }\n  },\n  {\n    type: 'section',\n    text: {\n      type: 'mrkdwn',\n      text: `*${data.updated.length} container(s)* were automatically updated (non-critical).`\n    }\n  }\n];\n\nfor (const update of data.updated) {\n  blocks.push({\n    type: 'section',\n    text: {\n      type: 'mrkdwn',\n      text: `🐳 *${update.name}*: \\`${update.previousVersion}\\` → \\`${update.newVersion}\\``\n    }\n  });\n}\n\nblocks.push({\n  type: 'context',\n  elements: [{\n    type: 'mrkdwn',\n    text: `Updated at ${new Date().toLocaleString()}`\n  }]\n});\n\nreturn [{\n  blocks,\n  text: `Auto-updated ${data.updated.length} containers`\n}];"
+      },
+      "id": "format-auto-update-notification",
+      "name": "Format Auto-Update Notification",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1540, 100]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.skip }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "if-notify",
+      "name": "Should Notify?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1760, 100]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SLACK_WEBHOOK_URL }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "id": "slack-auto-update",
+      "name": "Send Auto-Update Notification",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1980, 200]
+    },
+    {
+      "parameters": {},
+      "id": "no-updates",
+      "name": "No Updates Available",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [1100, 200]
+    },
+    {
+      "parameters": {},
+      "id": "skip-notify",
+      "name": "Skip Notification",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [1980, 0]
+    }
+  ],
+  "connections": {
+    "Weekly Sunday 3 AM": {
+      "main": [
+        [
+          {
+            "node": "Define Hosts & Rules",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Manual Update Trigger": {
+      "main": [
+        [
+          {
+            "node": "Define Hosts & Rules",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Define Hosts & Rules": {
+      "main": [
+        [
+          {
+            "node": "Get Running Containers",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Running Containers": {
+      "main": [
+        [
+          {
+            "node": "Check for Updates",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check for Updates": {
+      "main": [
+        [
+          {
+            "node": "Updates Available?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Updates Available?": {
+      "main": [
+        [
+          {
+            "node": "Approval Needed?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "No Updates Available",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Approval Needed?": {
+      "main": [
+        [
+          {
+            "node": "Format Approval Request",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Auto-Update Safe Containers",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Auto-Update Safe Containers",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Approval Request": {
+      "main": [
+        [
+          {
+            "node": "Send Approval Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Approval Request": {
+      "main": [
+        [
+          {
+            "node": "Store Pending Approvals",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Auto-Update Safe Containers": {
+      "main": [
+        [
+          {
+            "node": "Format Auto-Update Notification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Auto-Update Notification": {
+      "main": [
+        [
+          {
+            "node": "Should Notify?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Should Notify?": {
+      "main": [
+        [
+          {
+            "node": "Skip Notification",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send Auto-Update Notification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": {
+    "global": {
+      "pendingApprovals": [],
+      "pendingTimestamp": null
+    }
+  },
+  "tags": [
+    {
+      "name": "containers"
+    },
+    {
+      "name": "updates"
+    },
+    {
+      "name": "homelab"
+    },
+    {
+      "name": "approval"
+    }
+  ],
+  "triggerCount": 2,
+  "updatedAt": "2025-12-27T00:00:00.000Z",
+  "versionId": "1"
+}

@@ -146,13 +146,49 @@ services:
     profiles: ["ai"]
     ports:
       - "${N8N_PORT:-5678}:5678"
+    dns:
+      - 192.168.0.19
+      - 8.8.8.8
     environment:
       - N8N_HOST=0.0.0.0
       - N8N_PORT=5678
       - N8N_PROTOCOL=http
       - NODE_ENV=production
-      - WEBHOOK_URL=http://192.168.0.52:5678/
+      - N8N_TRUST_PROXY=true
+      - WEBHOOK_URL=https://capcorp9000.tailc12764.ts.net/
       - GENERIC_TIMEZONE=America/Chicago
+      # Slack Webhooks (for simple notifications)
+      - SLACK_WEBHOOK_URL=${SLACK_WEBHOOK_URL}
+      - SLACK_DIGEST_WEBHOOK_URL=${SLACK_DIGEST_WEBHOOK_URL}
+      # Slack Bot (for interactive messages with buttons)
+      - SLACK_BOT_TOKEN=${SLACK_BOT_TOKEN}
+      - SLACK_CHANNEL_ID=${SLACK_CHANNEL_ID}
+      # Pi-hole
+      - PIHOLE_URL=http://192.168.0.19
+      - PIHOLE_PASSWORD=${PIHOLE_PASSWORD}
+      # Home Assistant
+      - HA_URL=http://192.168.0.19:8123
+      - HA_TOKEN=${HA_TOKEN}
+      # Sonarr
+      - SONARR_URL=${SONARR_URL:-http://192.168.0.51:8989}
+      - SONARR_API_KEY=${SONARR_API_KEY}
+      # Radarr
+      - RADARR_URL=${RADARR_URL:-http://192.168.0.51:7878}
+      - RADARR_API_KEY=${RADARR_API_KEY}
+      # Prowlarr
+      - PROWLARR_URL=${PROWLARR_URL:-http://192.168.0.51:9696}
+      - PROWLARR_API_KEY=${PROWLARR_API_KEY}
+      # Lidarr
+      - LIDARR_URL=${LIDARR_URL:-http://192.168.0.51:8686}
+      - LIDARR_API_KEY=${LIDARR_API_KEY}
+      # Readarr
+      - READARR_URL=${READARR_URL:-http://192.168.0.51:8787}
+      - READARR_API_KEY=${READARR_API_KEY}
+      # Infrastructure
+      - PROMETHEUS_URL=http://192.168.0.19:9090
+      - GRAFANA_URL=http://192.168.0.19:3000
+      - LOKI_URL=http://192.168.0.19:3100
+      - UNRAID_HOST=192.168.0.51
     volumes:
       - n8n_data:/home/node/.n8n
     networks:

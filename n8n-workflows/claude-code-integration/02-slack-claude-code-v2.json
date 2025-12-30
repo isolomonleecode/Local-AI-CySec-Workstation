@@ -1,0 +1,729 @@
+{
+  "name": "Slack → Claude Code Assistant v2 (SSH)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "slack-claude-v2",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "slack-trigger",
+      "name": "Slack Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [0, 300],
+      "webhookId": "slack-claude-v2"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "is-challenge",
+              "leftValue": "={{$json.body.type}}",
+              "rightValue": "url_verification",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "is-challenge",
+      "name": "Is URL Verification?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [-220, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ challenge: $json.body.challenge }) }}",
+        "options": {}
+      },
+      "id": "respond-challenge",
+      "name": "Respond to Challenge",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [-220, 100]
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "OK",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "respond-ok",
+      "name": "Respond OK",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [0, 500]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract message data and detect slash commands\nconst body = $input.first().json.body || $input.first().json;\nconst event = body.event;\n\nif (!event) {\n  // Not an event callback, skip\n  return [];\n}\n\n// Clean message (remove bot mention)\nconst rawText = event.text || '';\nconst userMessage = rawText.replace(/<@[A-Z0-9]+>/g, '').trim();\n\n// Detect if this is a slash command\nconst isCommand = userMessage.startsWith('/');\nlet command = null;\nlet commandArgs = '';\n\nif (isCommand) {\n  const parts = userMessage.split(' ');\n  command = parts[0].toLowerCase();\n  commandArgs = parts.slice(1).join(' ');\n}\n\n// Get thread context - use thread_ts if in thread, otherwise use ts as new thread root\nconst threadTs = event.thread_ts || event.ts;\nconst messageTs = event.ts;\n\n// Use a fixed Claude session ID for all Slack conversations\nconst sessionId = 'YOUR_CLAUDE_SESSION_ID';  // Replace with your Claude session ID (UUID format)\n\nreturn [{\n  json: {\n    userMessage,\n    channelId: event.channel,\n    threadTs,\n    messageTs,\n    userId: event.user,\n    sessionId,\n    isCommand,\n    command,\n    commandArgs,\n    rawEvent: event\n  }\n}];"
+      },
+      "id": "extract-and-detect",
+      "name": "Extract & Detect Commands",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [220, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "is-command",
+              "leftValue": "={{$json.isCommand}}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "is-command-switch",
+      "name": "Is Slash Command?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [440, 300]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": { "caseSensitive": false, "leftValue": "", "typeValidation": "strict" },
+                "conditions": [{ "leftValue": "={{$json.command}}", "rightValue": "/help", "operator": { "type": "string", "operation": "equals" } }],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "help"
+            },
+            {
+              "conditions": {
+                "options": { "caseSensitive": false, "leftValue": "", "typeValidation": "strict" },
+                "conditions": [{ "leftValue": "={{$json.command}}", "rightValue": "/clear", "operator": { "type": "string", "operation": "equals" } }],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "clear"
+            },
+            {
+              "conditions": {
+                "options": { "caseSensitive": false, "leftValue": "", "typeValidation": "strict" },
+                "conditions": [{ "leftValue": "={{$json.command}}", "rightValue": "/model", "operator": { "type": "string", "operation": "equals" } }],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "model"
+            },
+            {
+              "conditions": {
+                "options": { "caseSensitive": false, "leftValue": "", "typeValidation": "strict" },
+                "conditions": [{ "leftValue": "={{$json.command}}", "rightValue": "/system", "operator": { "type": "string", "operation": "equals" } }],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "system"
+            },
+            {
+              "conditions": {
+                "options": { "caseSensitive": false, "leftValue": "", "typeValidation": "strict" },
+                "conditions": [{ "leftValue": "={{$json.command}}", "rightValue": "/sessions", "operator": { "type": "string", "operation": "equals" } }],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "sessions"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra"
+        }
+      },
+      "id": "command-router",
+      "name": "Command Router",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [660, 100]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Handle /help command\nconst input = $input.first().json;\n\nconst helpText = `:robot_face: *Claude Code Assistant v2 (SSH)* - Help\n\n*This bot runs the full Claude Code CLI via SSH*, giving you access to:\n• :wrench: Tool use (file operations, code execution)\n• :brain: Persistent conversation memory per thread\n• :file_folder: Access to project files and codebase\n\n*Available Commands:*\n• \\`/help\\` - Show this help message\n• \\`/clear\\` - Clear conversation history for this thread\n• \\`/model [name]\\` - Switch model (sonnet/opus/haiku)\n• \\`/system [prompt]\\` - Set custom system prompt\n• \\`/sessions\\` - List active Claude sessions\n\n*Tips:*\n• Reply in a thread to maintain context\n• Ask Claude to read files, write code, run commands\n• Each Slack thread = separate Claude conversation`;\n\nreturn [{\n  json: {\n    channelId: input.channelId,\n    threadTs: input.threadTs,\n    text: helpText\n  }\n}];"
+      },
+      "id": "handle-help",
+      "name": "Handle /help",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [880, -100]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Handle /clear command - clears conversation history for thread\nconst input = $input.first().json;\nconst staticData = $getWorkflowStaticData('global');\n\nconst threadKey = `thread_${input.threadTs}`;\n\n// Clear the thread's settings (model, system prompt)\nif (staticData[threadKey]) {\n  delete staticData[threadKey];\n}\n\n// Note: Claude CLI session history is managed by Claude itself\n// /clear just resets our local settings and tells user to start fresh\n\nreturn [{\n  json: {\n    channelId: input.channelId,\n    threadTs: input.threadTs,\n    text: ':wastebasket: Thread settings cleared. Next message will start a fresh Claude session.\\n\\n_Note: Claude CLI manages its own session history. Use `--resume` to continue previous sessions._'\n  }\n}];"
+      },
+      "id": "handle-clear",
+      "name": "Handle /clear",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [880, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Handle /model command - switch model for thread\nconst input = $input.first().json;\nconst staticData = $getWorkflowStaticData('global');\n\nconst threadKey = `thread_${input.threadTs}`;\nconst modelArg = input.commandArgs.toLowerCase().trim();\n\n// Initialize thread data if needed\nif (!staticData[threadKey]) {\n  staticData[threadKey] = { model: 'sonnet', systemPrompt: null };\n}\n\n// Valid models for Claude CLI\nconst validModels = {\n  'sonnet': 'claude-sonnet-4-5-20250929',\n  'opus': 'claude-opus-4-5-20251101',\n  'haiku': 'claude-3-5-haiku-20241022'\n};\n\nlet responseText;\n\nif (!modelArg) {\n  const currentModel = staticData[threadKey].model || 'sonnet';\n  responseText = `:gear: *Current model:* \\`${currentModel}\\`\\n\\n*Available models:*\\n• \\`sonnet\\` - Balanced (default)\\n• \\`opus\\` - Most capable\\n• \\`haiku\\` - Fastest`;\n} else if (validModels[modelArg]) {\n  staticData[threadKey].model = modelArg;\n  responseText = `:white_check_mark: Model switched to \\`${modelArg}\\` for this thread.`;\n} else {\n  responseText = `:x: Invalid model: \\`${modelArg}\\`\\n\\n*Available:* sonnet, opus, haiku`;\n}\n\nreturn [{\n  json: {\n    channelId: input.channelId,\n    threadTs: input.threadTs,\n    text: responseText\n  }\n}];"
+      },
+      "id": "handle-model",
+      "name": "Handle /model",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [880, 100]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Handle /system command - set custom system prompt\nconst input = $input.first().json;\nconst staticData = $getWorkflowStaticData('global');\n\nconst threadKey = `thread_${input.threadTs}`;\nconst systemPrompt = input.commandArgs.trim();\n\n// Initialize thread data if needed\nif (!staticData[threadKey]) {\n  staticData[threadKey] = { model: 'sonnet', systemPrompt: null };\n}\n\nlet responseText;\n\nif (!systemPrompt) {\n  const currentPrompt = staticData[threadKey].systemPrompt || '(default Claude Code prompt)';\n  responseText = `:memo: *Current system prompt:*\\n\\`\\`\\`\\n${currentPrompt}\\n\\`\\`\\`\\n\\n*Usage:* \\`/system Your custom prompt here\\``;\n} else {\n  staticData[threadKey].systemPrompt = systemPrompt;\n  responseText = `:white_check_mark: System prompt updated for this thread:\\n\\`\\`\\`\\n${systemPrompt.substring(0, 200)}${systemPrompt.length > 200 ? '...' : ''}\\n\\`\\`\\``;\n}\n\nreturn [{\n  json: {\n    channelId: input.channelId,\n    threadTs: input.threadTs,\n    text: responseText\n  }\n}];"
+      },
+      "id": "handle-system",
+      "name": "Handle /system",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [880, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Handle /sessions command - list Claude CLI sessions\nconst input = $input.first().json;\n\n// This will be populated by an SSH call to list sessions\nreturn [{\n  json: {\n    channelId: input.channelId,\n    threadTs: input.threadTs,\n    sessionId: input.sessionId,\n    commandType: 'list_sessions'\n  }\n}];"
+      },
+      "id": "handle-sessions",
+      "name": "Handle /sessions",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [880, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Handle unknown command\nconst input = $input.first().json;\n\nreturn [{\n  json: {\n    channelId: input.channelId,\n    threadTs: input.threadTs,\n    text: `:question: Unknown command: \\`${input.command}\\`\\n\\nType \\`/help\\` to see available commands.`\n  }\n}];"
+      },
+      "id": "handle-unknown-cmd",
+      "name": "Handle Unknown Command",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [880, 400]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "post",
+        "channel": "={{$json.channelId}}",
+        "text": "={{$json.text}}",
+        "otherOptions": {
+          "thread_ts": "={{$json.threadTs}}"
+        }
+      },
+      "id": "send-command-response",
+      "name": "Send Command Response",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.1,
+      "position": [1100, 100],
+      "credentials": {
+        "slackApi": {
+          "id": "3",
+          "name": "Slack API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "command": "=claude --resume {{ $json.sessionId }} --print \"List active sessions\"",
+        "cwd": "/path/to/your/project"
+      },
+      "id": "ssh-list-sessions",
+      "name": "SSH List Sessions",
+      "type": "n8n-nodes-base.ssh",
+      "typeVersion": 1,
+      "position": [1100, 300],
+      "credentials": {
+        "sshPassword": {
+          "id": "SSH_CREDENTIAL_ID",
+          "name": "SSH to Workstation"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Format sessions list response\nconst input = $input.first().json;\nconst prevData = $('Handle /sessions').first().json;\n\nconst sessionsOutput = input.stdout || 'No active sessions found.';\n\nreturn [{\n  json: {\n    channelId: prevData.channelId,\n    threadTs: prevData.threadTs,\n    text: `:file_cabinet: *Claude Sessions*\\n\\`\\`\\`\\n${sessionsOutput}\\n\\`\\`\\``\n  }\n}];"
+      },
+      "id": "format-sessions",
+      "name": "Format Sessions",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1320, 300]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "post",
+        "channel": "={{$json.channelId}}",
+        "text": "={{$json.text}}",
+        "otherOptions": {
+          "thread_ts": "={{$json.threadTs}}"
+        }
+      },
+      "id": "send-sessions-response",
+      "name": "Send Sessions Response",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.1,
+      "position": [1540, 300],
+      "credentials": {
+        "slackApi": {
+          "id": "3",
+          "name": "Slack API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "post",
+        "channel": "={{$json.channelId}}",
+        "text": ":thinking_face: Processing with Claude Code CLI...",
+        "otherOptions": {
+          "thread_ts": "={{$json.threadTs}}"
+        }
+      },
+      "id": "send-thinking",
+      "name": "Send Thinking Message",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.1,
+      "position": [660, 500],
+      "credentials": {
+        "slackApi": {
+          "id": "3",
+          "name": "Slack API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepare Claude CLI command with thread settings\n// Get original message data from Is Slash Command node (before Send Thinking Message)\nconst input = $('Is Slash Command?').first().json;\nconst thinkingResponse = $('Send Thinking Message').first().json;\nconst staticData = $getWorkflowStaticData('global');\n\nconst threadKey = `thread_${input.threadTs}`;\n\n// Get thread settings (model, system prompt)\nconst threadSettings = staticData[threadKey] || { model: 'sonnet', systemPrompt: null };\n\n// Model mapping for CLI\nconst modelMap = {\n  'sonnet': 'claude-sonnet-4-5-20250929',\n  'opus': 'claude-opus-4-5-20251101',\n  'haiku': 'claude-3-5-haiku-20241022'\n};\nconst model = modelMap[threadSettings.model] || modelMap.sonnet;\n\n// Escape message for shell (handle quotes, special chars)\nconst escapedMessage = input.userMessage\n  .replace(/\\\\/g, '\\\\\\\\')\n  .replace(/\"/g, '\\\\\"')\n  .replace(/\\$/g, '\\\\$')\n  .replace(/`/g, '\\\\`');\n\n// Build Claude CLI command\n// --print: Non-interactive, print response and exit\n// --resume: Continue existing session (creates new if doesn't exist)\n// --model: Specify model\n// --system-prompt: Custom system prompt (if set)\nlet claudeCmd = `claude --print --resume \"${input.sessionId}\" --model \"${model}\"`;\n\nif (threadSettings.systemPrompt) {\n  const escapedPrompt = threadSettings.systemPrompt\n    .replace(/\\\\/g, '\\\\\\\\')\n    .replace(/\"/g, '\\\\\"')\n    .replace(/\\$/g, '\\\\$')\n    .replace(/`/g, '\\\\`');\n  claudeCmd += ` --system-prompt \"${escapedPrompt}\"`;\n}\n\nclaudeCmd += ` \"${escapedMessage}\"`;\n\nreturn [{\n  json: {\n    ...input,\n    thinkingMessageTs: thinkingResponse.ts,\n    claudeCommand: claudeCmd,\n    model,\n    threadKey\n  }\n}];"
+      },
+      "id": "prepare-claude-cmd",
+      "name": "Prepare Claude Command",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [880, 500]
+    },
+    {
+      "parameters": {
+        "command": "={{$json.claudeCommand}}",
+        "cwd": "/path/to/your/project",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "id": "ssh-claude-cli",
+      "name": "SSH Execute Claude CLI",
+      "type": "n8n-nodes-base.ssh",
+      "typeVersion": 1,
+      "position": [1100, 500],
+      "credentials": {
+        "sshPassword": {
+          "id": "SSH_CREDENTIAL_ID",
+          "name": "SSH to Workstation"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Process Claude CLI response\nconst sshResult = $input.first().json;\nconst prevData = $('Prepare Claude Command').first().json;\n\n// Check for errors\nif (sshResult.stderr && !sshResult.stdout) {\n  return [{\n    json: {\n      channelId: prevData.channelId,\n      threadTs: prevData.threadTs,\n      thinkingMessageTs: prevData.thinkingMessageTs,\n      text: `:x: Claude CLI Error:\\n\\`\\`\\`\\n${sshResult.stderr.substring(0, 500)}\\n\\`\\`\\``,\n      isError: true\n    }\n  }];\n}\n\nconst claudeResponse = sshResult.stdout || 'No response received from Claude CLI.';\n\n// Split response if too long for Slack (4000 char limit)\nconst maxLength = 3900;\nconst responses = [];\n\nif (claudeResponse.length > maxLength) {\n  const paragraphs = claudeResponse.split('\\n\\n');\n  let currentChunk = '';\n  \n  for (const para of paragraphs) {\n    if ((currentChunk + para).length > maxLength) {\n      if (currentChunk) responses.push(currentChunk);\n      // If single paragraph is too long, split by newlines\n      if (para.length > maxLength) {\n        const lines = para.split('\\n');\n        let lineChunk = '';\n        for (const line of lines) {\n          if ((lineChunk + line).length > maxLength) {\n            if (lineChunk) responses.push(lineChunk);\n            lineChunk = line;\n          } else {\n            lineChunk += (lineChunk ? '\\n' : '') + line;\n          }\n        }\n        currentChunk = lineChunk;\n      } else {\n        currentChunk = para;\n      }\n    } else {\n      currentChunk += (currentChunk ? '\\n\\n' : '') + para;\n    }\n  }\n  if (currentChunk) responses.push(currentChunk);\n} else {\n  responses.push(claudeResponse);\n}\n\n// Return all chunks\nreturn responses.map((text, index) => ({\n  json: {\n    channelId: prevData.channelId,\n    threadTs: prevData.threadTs,\n    thinkingMessageTs: prevData.thinkingMessageTs,\n    text,\n    isFirstMessage: index === 0,\n    messageIndex: index + 1,\n    totalMessages: responses.length,\n    isError: false\n  }\n}));"
+      },
+      "id": "process-response",
+      "name": "Process CLI Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1320, 500]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "is-first",
+              "leftValue": "={{$json.isFirstMessage}}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "is-first-chunk",
+      "name": "Is First Chunk?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1540, 500]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "post",
+        "channel": "={{$json.channelId}}",
+        "text": "={{$json.text}}",
+        "otherOptions": {
+          "thread_ts": "={{$json.threadTs}}"
+        }
+      },
+      "id": "update-thinking-message",
+      "name": "Send Claude Response",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.1,
+      "position": [1760, 400],
+      "credentials": {
+        "slackApi": {
+          "id": "3",
+          "name": "Slack API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "post",
+        "channel": "={{$json.channelId}}",
+        "text": "={{$json.text}}",
+        "otherOptions": {
+          "thread_ts": "={{$json.threadTs}}"
+        }
+      },
+      "id": "send-additional-chunks",
+      "name": "Send Additional Chunks",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.1,
+      "position": [1760, 600],
+      "credentials": {
+        "slackApi": {
+          "id": "3",
+          "name": "Slack API"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Slack Webhook": {
+      "main": [
+        [
+          {
+            "node": "Is URL Verification?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is URL Verification?": {
+      "main": [
+        [
+          {
+            "node": "Respond to Challenge",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond OK",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Respond OK": {
+      "main": [
+        [
+          {
+            "node": "Extract & Detect Commands",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract & Detect Commands": {
+      "main": [
+        [
+          {
+            "node": "Is Slash Command?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Slash Command?": {
+      "main": [
+        [
+          {
+            "node": "Command Router",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send Thinking Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Command Router": {
+      "main": [
+        [
+          {
+            "node": "Handle /help",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Handle /clear",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Handle /model",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Handle /system",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Handle /sessions",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Handle Unknown Command",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Handle /help": {
+      "main": [
+        [
+          {
+            "node": "Send Command Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Handle /clear": {
+      "main": [
+        [
+          {
+            "node": "Send Command Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Handle /model": {
+      "main": [
+        [
+          {
+            "node": "Send Command Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Handle /system": {
+      "main": [
+        [
+          {
+            "node": "Send Command Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Handle /sessions": {
+      "main": [
+        [
+          {
+            "node": "SSH List Sessions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "SSH List Sessions": {
+      "main": [
+        [
+          {
+            "node": "Format Sessions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Sessions": {
+      "main": [
+        [
+          {
+            "node": "Send Sessions Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Handle Unknown Command": {
+      "main": [
+        [
+          {
+            "node": "Send Command Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Thinking Message": {
+      "main": [
+        [
+          {
+            "node": "Prepare Claude Command",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Claude Command": {
+      "main": [
+        [
+          {
+            "node": "SSH Execute Claude CLI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "SSH Execute Claude CLI": {
+      "main": [
+        [
+          {
+            "node": "Process CLI Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process CLI Response": {
+      "main": [
+        [
+          {
+            "node": "Is First Chunk?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is First Chunk?": {
+      "main": [
+        [
+          {
+            "node": "Send Claude Response",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send Additional Chunks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [
+    {
+      "name": "claude-code"
+    },
+    {
+      "name": "slack"
+    },
+    {
+      "name": "ssh"
+    },
+    {
+      "name": "v2"
+    }
+  ],
+  "pinData": {},
+  "versionId": "2"
+}

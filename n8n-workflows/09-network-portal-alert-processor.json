@@ -1,0 +1,275 @@
+{
+  "name": "Network Portal Alert AI Processor",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "portal-alert",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [0, 0],
+      "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+      "name": "Portal Alert Webhook",
+      "webhookId": "portal-alert-webhook-id"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse incoming alert from Network Admin Portal\nconst input = $input.first().json;\nconst body = input.body || input;\n\n// Extract alert data\nconst alert = {\n  id: body.alert_id || 'unknown',\n  title: body.title || 'Network Alert',\n  message: body.message || '',\n  severity: body.severity || 'info',\n  alert_type: body.alert_type || 'unknown',\n  device_name: body.device?.name || body.device_name || 'Unknown Device',\n  device_ip: body.device?.ip_address || body.device_ip || 'N/A',\n  device_mac: body.device?.mac_address || body.device_mac || 'N/A',\n  triggered_at: body.triggered_at || new Date().toISOString(),\n  details: body.details || {},\n  raw_payload: JSON.stringify(body)\n};\n\n// Processing config from portal\nconst processing = body.processing || {};\nconst config = {\n  enable_ai_analysis: processing.enable_ai_analysis !== false,\n  localai_endpoint: processing.localai_endpoint || 'http://192.168.0.52:8080',\n  ai_model: processing.ai_model || 'qwen2.5-7b'\n};\n\n// Determine severity level for routing\nconst severityLevel = {\n  'critical': 3,\n  'warning': 2,\n  'info': 1\n}[alert.severity] || 1;\n\nreturn [{ json: { alert, config, severity_level: severityLevel } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [220, 0],
+      "id": "b2c3d4e5-f6a7-8901-bcde-f23456789012",
+      "name": "Parse Alert Data"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build AI analysis prompt\nconst { alert, config, severity_level } = $input.first().json;\n\nconst systemPrompt = `You are a network security analyst for a home/small office network. Analyze alerts from the Network Admin Portal and provide actionable insights. Be concise but thorough.`;\n\nconst userPrompt = `Analyze this network alert:\n\n**Alert:** ${alert.title}\n**Severity:** ${alert.severity.toUpperCase()}\n**Type:** ${alert.alert_type}\n**Device:** ${alert.device_name} (${alert.device_ip})\n**Time:** ${alert.triggered_at}\n**Message:** ${alert.message}\n**Details:** ${JSON.stringify(alert.details, null, 2)}\n\nProvide:\n1. Risk Level (Low/Medium/High/Critical)\n2. Likely Cause (1-2 sentences)\n3. Recommended Action (specific steps)\n4. Escalation Needed? (Yes/No with brief reason)\n\nKeep response under 200 words.`;\n\nconst requestBody = {\n  model: config.ai_model,\n  messages: [\n    { role: 'system', content: systemPrompt },\n    { role: 'user', content: userPrompt }\n  ],\n  temperature: 0.3,\n  max_tokens: 300\n};\n\nreturn [{ json: { alert, config, severity_level, request_body: requestBody } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [440, 0],
+      "id": "c3d4e5f6-a7b8-9012-cdef-345678901234",
+      "name": "Build AI Prompt"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://192.168.0.52:8080/v1/chat/completions",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.request_body) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [660, 0],
+      "id": "d4e5f6a7-b8c9-0123-defa-456789012345",
+      "name": "LocalAI Analysis",
+      "retryOnFail": true,
+      "waitBetweenTries": 2000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract AI analysis and combine with alert\nconst prevData = $node['Build AI Prompt'].json;\nconst alert = prevData.alert;\nconst config = prevData.config;\nconst severity_level = prevData.severity_level;\n\nconst aiResponse = $input.first().json;\nlet aiAnalysis = 'AI analysis unavailable';\n\ntry {\n  aiAnalysis = aiResponse.choices?.[0]?.message?.content || aiAnalysis;\n} catch (e) {\n  aiAnalysis = 'AI analysis failed: ' + e.message;\n}\n\n// Parse escalation recommendation from AI\nconst needsEscalation = aiAnalysis.toLowerCase().includes('escalation needed: yes') ||\n                        aiAnalysis.toLowerCase().includes('escalation: yes') ||\n                        (alert.severity === 'critical');\n\nreturn [{\n  json: {\n    alert,\n    config,\n    ai_analysis: aiAnalysis,\n    needs_escalation: needsEscalation,\n    severity_level: severity_level,\n    processed_at: new Date().toISOString()\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [880, 0],
+      "id": "e5f6a7b8-c9d0-1234-efab-567890123456",
+      "name": "Process AI Response"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "cond-critical-1",
+              "leftValue": "={{ $json.severity_level }}",
+              "rightValue": 3,
+              "operator": {
+                "type": "number",
+                "operation": "gte"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [1100, 0],
+      "id": "f6a7b8c9-d0e1-2345-fabc-678901234567",
+      "name": "Is Critical?"
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $env.TELEGRAM_CHAT_ID || '123456789' }}",
+        "text": "=🚨 *CRITICAL ALERT*\n\n*{{ $json.alert.title }}*\n*Device:* {{ $json.alert.device_name }} ({{ $json.alert.device_ip }})\n*Type:* {{ $json.alert.alert_type }}\n*Time:* {{ $json.alert.triggered_at }}\n\n📋 *Message:*\n{{ $json.alert.message }}\n\n🤖 *AI Analysis:*\n{{ $json.ai_analysis }}",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [1320, -100],
+      "id": "telegram-critical-id",
+      "name": "Telegram Critical",
+      "credentials": {
+        "telegramApi": {
+          "id": "YOUR_TELEGRAM_CREDS_ID",
+          "name": "Telegram Bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "cond-warning-1",
+              "leftValue": "={{ $json.severity_level }}",
+              "rightValue": 2,
+              "operator": {
+                "type": "number",
+                "operation": "gte"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [1320, 100],
+      "id": "g7b8c9d0-e1f2-3456-abcd-789012345678",
+      "name": "Is Warning?"
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $env.TELEGRAM_CHAT_ID || '123456789' }}",
+        "text": "=⚠️ *WARNING ALERT*\n\n*{{ $json.alert.title }}*\n*Device:* {{ $json.alert.device_name }} ({{ $json.alert.device_ip }})\n*Type:* {{ $json.alert.alert_type }}\n*Time:* {{ $json.alert.triggered_at }}\n\n📋 *Message:*\n{{ $json.alert.message }}\n\n🤖 *AI Analysis:*\n{{ $json.ai_analysis }}",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [1540, 0],
+      "id": "telegram-warning-id",
+      "name": "Telegram Warning",
+      "credentials": {
+        "telegramApi": {
+          "id": "YOUR_TELEGRAM_CREDS_ID",
+          "name": "Telegram Bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Log info alerts without notification\nconst data = $input.first().json;\n\nconsole.log(`[INFO] Alert ${data.alert.id}: ${data.alert.title}`);\nconsole.log(`Device: ${data.alert.device_name}`);\nconsole.log(`AI Analysis: ${data.ai_analysis.substring(0, 100)}...`);\n\nreturn [{ json: { ...data, action: 'logged_only', notification_sent: false } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1540, 200],
+      "id": "h8c9d0e1-f2a3-4567-bcde-890123456789",
+      "name": "Log Info Alert"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Final output - mark as processed\nconst data = $input.first().json;\n\nreturn [{\n  json: {\n    success: true,\n    alert_id: data.alert.id,\n    severity: data.alert.severity,\n    processed: true,\n    ai_analysis: data.ai_analysis ? 'completed' : 'skipped',\n    notification_sent: data.notification_sent !== false,\n    escalated: data.escalated || false,\n    processed_at: data.processed_at\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1760, 0],
+      "id": "i9d0e1f2-a3b4-5678-cdef-901234567890",
+      "name": "Final Output"
+    },
+    {
+      "parameters": {
+        "content": "## Network Portal Alert AI Processor\n\n**Webhook URL:** http://192.168.0.52:5678/webhook/portal-alert\n\n**Flow:**\n1. Receive alert from Network Admin Portal\n2. Parse alert data and config\n3. Build AI prompt for LocalAI analysis\n4. Call LocalAI (qwen2.5-7b)\n5. Process AI response\n6. Route by severity:\n   - Critical (3) → Telegram + optional Claude escalation\n   - Warning (2) → Telegram\n   - Info (1) → Log only\n\n**Required Setup:**\n- Set TELEGRAM_CHAT_ID environment variable\n- Configure Telegram Bot credentials\n- LocalAI running at http://192.168.0.52:8080",
+        "height": 400,
+        "width": 360
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [-200, -200],
+      "typeVersion": 1,
+      "id": "sticky-note-1",
+      "name": "Instructions"
+    }
+  ],
+  "pinData": {
+    "Portal Alert Webhook": [
+      {
+        "json": {
+          "body": {
+            "alert_id": 123,
+            "title": "Device Offline: sweetrpi-desktop",
+            "message": "Device sweetrpi-desktop has been offline for 15 minutes",
+            "severity": "warning",
+            "alert_type": "device_offline",
+            "device_name": "sweetrpi-desktop",
+            "device_ip": "192.168.0.19",
+            "triggered_at": "2025-12-19T10:30:00.000Z",
+            "details": {
+              "last_seen": "2025-12-19T10:15:00.000Z",
+              "offline_minutes": 15,
+              "has_wazuh_agent": true
+            },
+            "processing": {
+              "enable_ai_analysis": true,
+              "localai_endpoint": "http://192.168.0.52:8080",
+              "ai_model": "qwen2.5-7b"
+            }
+          }
+        }
+      }
+    ]
+  },
+  "connections": {
+    "Portal Alert Webhook": {
+      "main": [[{ "node": "Parse Alert Data", "type": "main", "index": 0 }]]
+    },
+    "Parse Alert Data": {
+      "main": [[{ "node": "Build AI Prompt", "type": "main", "index": 0 }]]
+    },
+    "Build AI Prompt": {
+      "main": [[{ "node": "LocalAI Analysis", "type": "main", "index": 0 }]]
+    },
+    "LocalAI Analysis": {
+      "main": [[{ "node": "Process AI Response", "type": "main", "index": 0 }]]
+    },
+    "Process AI Response": {
+      "main": [[{ "node": "Is Critical?", "type": "main", "index": 0 }]]
+    },
+    "Is Critical?": {
+      "main": [
+        [{ "node": "Telegram Critical", "type": "main", "index": 0 }],
+        [{ "node": "Is Warning?", "type": "main", "index": 0 }]
+      ]
+    },
+    "Is Warning?": {
+      "main": [
+        [{ "node": "Telegram Warning", "type": "main", "index": 0 }],
+        [{ "node": "Log Info Alert", "type": "main", "index": 0 }]
+      ]
+    },
+    "Telegram Critical": {
+      "main": [[{ "node": "Final Output", "type": "main", "index": 0 }]]
+    },
+    "Telegram Warning": {
+      "main": [[{ "node": "Final Output", "type": "main", "index": 0 }]]
+    },
+    "Log Info Alert": {
+      "main": [[{ "node": "Final Output", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "versionId": "network-portal-alert-v2",
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "tags": []
+}

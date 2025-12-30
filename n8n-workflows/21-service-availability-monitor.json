@@ -1,0 +1,211 @@
+{
+  "name": "Service Availability Monitor",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 2
+            }
+          ]
+        }
+      },
+      "id": "schedule-trigger",
+      "name": "Every 2 Minutes",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Define services to monitor\nconst services = [\n  { name: 'Pi-hole', url: 'http://192.168.0.19:80/admin/', critical: true },\n  { name: 'Grafana', url: 'http://192.168.0.19:3000/api/health', critical: true },\n  { name: 'Prometheus', url: 'http://192.168.0.19:9090/-/healthy', critical: true },\n  { name: 'Vaultwarden', url: 'http://192.168.0.19:1776/', critical: true },\n  { name: 'n8n', url: 'http://192.168.0.52:5678/healthz', critical: true },\n  { name: 'LocalAI', url: 'http://192.168.0.52:8080/readyz', critical: false },\n  { name: 'Nextcloud', url: 'http://192.168.0.51:11000/status.php', critical: true },\n  { name: 'Plex', url: 'http://192.168.0.51:32400/identity', critical: false },\n  { name: 'Home Assistant', url: 'http://192.168.0.19:8123/api/', critical: false }\n];\n\nreturn services.map(s => ({ json: s }));"
+      },
+      "id": "define-services",
+      "name": "Define Services",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [220, 0]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $json.url }}",
+        "options": {
+          "timeout": 5000,
+          "redirect": {
+            "redirect": {
+              "followRedirects": true,
+              "maxRedirects": 3
+            }
+          }
+        }
+      },
+      "id": "check-service",
+      "name": "Check Service",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [440, 0],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Process check results and track failure counts\nconst items = $input.all();\nconst results = [];\n\n// Get or initialize failure tracking from static data\nconst staticData = $getWorkflowStaticData('global');\nif (!staticData.failureCounts) staticData.failureCounts = {};\nif (!staticData.lastAlertTime) staticData.lastAlertTime = {};\n\nconst now = Date.now();\nconst ALERT_COOLDOWN = 30 * 60 * 1000; // 30 minutes\nconst FAILURE_THRESHOLD = 3;\n\nfor (let i = 0; i < items.length; i++) {\n  const service = $('Define Services').all()[i].json;\n  const item = items[i];\n  \n  // n8n HTTP Request: success = no error property, failure = has error property\n  // When continueOnFail is true, failed requests have item.error set\n  const hasError = !!item.error;\n  \n  // Check if request succeeded (no error means HTTP request completed)\n  // We consider any completed request as 'up' since we got a response\n  const isUp = !hasError;\n  \n  if (!isUp) {\n    // Increment failure count\n    staticData.failureCounts[service.name] = (staticData.failureCounts[service.name] || 0) + 1;\n  } else {\n    // Reset on success\n    if (staticData.failureCounts[service.name] >= FAILURE_THRESHOLD) {\n      // Service recovered from being down - send recovery alert\n      results.push({\n        service: service.name,\n        status: 'recovered',\n        critical: service.critical,\n        message: `${service.name} is back online`,\n        sendAlert: true\n      });\n    }\n    staticData.failureCounts[service.name] = 0;\n  }\n  \n  const failureCount = staticData.failureCounts[service.name];\n  const lastAlert = staticData.lastAlertTime[service.name] || 0;\n  const cooldownPassed = (now - lastAlert) > ALERT_COOLDOWN;\n  \n  // Only alert after threshold failures and respect cooldown\n  if (failureCount >= FAILURE_THRESHOLD && cooldownPassed) {\n    staticData.lastAlertTime[service.name] = now;\n    results.push({\n      service: service.name,\n      status: 'down',\n      critical: service.critical,\n      failureCount: failureCount,\n      message: `${service.name} is DOWN (${failureCount} consecutive failures)`,\n      sendAlert: true\n    });\n  }\n}\n\n// Return summary\nreturn [{\n  results: results,\n  hasAlerts: results.length > 0 && results.some(r => r.sendAlert),\n  timestamp: new Date().toISOString()\n}];"
+      },
+      "id": "analyze-results",
+      "name": "Analyze Results",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [660, 0]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.hasAlerts }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "if-alerts",
+      "name": "Has Alerts?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [880, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Format Slack message for service alerts\nconst data = $input.first().json;\n\n// Filter to only results that need alerts\nconst alertResults = (data.results || []).filter(r => r.sendAlert);\n\n// If no alerts to send, return empty to skip Slack\nif (alertResults.length === 0) {\n  return [];\n}\n\nconst blocks = [\n  {\n    type: 'header',\n    text: {\n      type: 'plain_text',\n      text: '🌐 Service Availability Alert',\n      emoji: true\n    }\n  }\n];\n\nfor (const result of alertResults) {\n  const emoji = result.status === 'recovered' ? '✅' : (result.critical ? '🔴' : '🟡');\n  blocks.push({\n    type: 'section',\n    text: {\n      type: 'mrkdwn',\n      text: `${emoji} *${result.service}*: ${result.message}`\n    }\n  });\n}\n\nblocks.push({\n  type: 'context',\n  elements: [{\n    type: 'mrkdwn',\n    text: `Checked at ${new Date().toLocaleString()}`\n  }]\n});\n\nreturn [{\n  blocks: blocks,\n  text: `Service Alert: ${alertResults.length} service(s) need attention`\n}];"
+      },
+      "id": "format-slack",
+      "name": "Format Slack Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1100, -100]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SLACK_WEBHOOK_URL }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "id": "slack-notify",
+      "name": "Send Slack Alert",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1320, -100]
+    },
+    {
+      "parameters": {},
+      "id": "no-op",
+      "name": "All Services OK",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [1100, 100]
+    }
+  ],
+  "connections": {
+    "Every 2 Minutes": {
+      "main": [
+        [
+          {
+            "node": "Define Services",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Define Services": {
+      "main": [
+        [
+          {
+            "node": "Check Service",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Service": {
+      "main": [
+        [
+          {
+            "node": "Analyze Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Analyze Results": {
+      "main": [
+        [
+          {
+            "node": "Has Alerts?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Alerts?": {
+      "main": [
+        [
+          {
+            "node": "Format Slack Message",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "All Services OK",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Slack Message": {
+      "main": [
+        [
+          {
+            "node": "Send Slack Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": {
+    "global": {
+      "failureCounts": {},
+      "lastAlertTime": {}
+    }
+  },
+  "tags": [
+    {
+      "name": "monitoring"
+    },
+    {
+      "name": "availability"
+    },
+    {
+      "name": "homelab"
+    }
+  ],
+  "triggerCount": 1,
+  "updatedAt": "2025-12-27T00:00:00.000Z",
+  "versionId": "1"
+}

@@ -1,0 +1,405 @@
+{
+  "name": "Security Event Correlator",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "wazuh-alert",
+        "options": {}
+      },
+      "id": "wazuh-webhook",
+      "name": "Wazuh Alert Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        -100
+      ],
+      "webhookId": "wazuh-alert"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 15
+            }
+          ]
+        }
+      },
+      "id": "scheduled-check",
+      "name": "Every 15 Minutes",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse incoming Wazuh alert and tag as wazuh source\nconst alert = $input.first().json;\n\nreturn [{\n  _source: 'wazuh',\n  eventType: alert.rule?.description || 'Unknown Alert',\n  severity: alert.rule?.level >= 12 ? 'critical' : alert.rule?.level >= 8 ? 'high' : alert.rule?.level >= 5 ? 'medium' : 'low',\n  level: alert.rule?.level || 0,\n  agent: alert.agent?.name || 'unknown',\n  sourceIP: alert.data?.srcip || alert.data?.src_ip || null,\n  destIP: alert.data?.dstip || alert.data?.dst_ip || null,\n  user: alert.data?.srcuser || alert.data?.user || null,\n  ruleId: alert.rule?.id || 'unknown',\n  groups: alert.rule?.groups || [],\n  timestamp: alert.timestamp || new Date().toISOString(),\n  raw: alert\n}];"
+      },
+      "id": "parse-wazuh",
+      "name": "Parse Wazuh Alert",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        -100
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "http://192.168.0.19:3100/loki/api/v1/query_range",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "query",
+              "value": "{job=\"varlogs\"} |~ \"(?i)(failed|error|denied|unauthorized|blocked)\""
+            },
+            {
+              "name": "start",
+              "value": "={{ Math.floor((Date.now() - 15 * 60 * 1000) / 1000) }}"
+            },
+            {
+              "name": "end",
+              "value": "={{ Math.floor(Date.now() / 1000) }}"
+            },
+            {
+              "name": "limit",
+              "value": "100"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "query-loki",
+      "name": "Query Loki Logs",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        220,
+        100
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse and categorize Loki security events, tag as loki source\nconst lokiResponse = $input.first().json;\nconst events = [];\n\n// Handle error case\nif (lokiResponse?.error) {\n  return [{\n    _source: 'loki',\n    events: [],\n    totalEvents: 0,\n    byCategory: {},\n    bySeverity: {},\n    error: lokiResponse.error\n  }];\n}\n\nif (lokiResponse?.data?.result) {\n  for (const stream of lokiResponse.data.result) {\n    const labels = stream.stream || {};\n    for (const [ts, line] of (stream.values || [])) {\n      // Categorize the event\n      let category = 'unknown';\n      let severity = 'low';\n      \n      const lowerLine = line.toLowerCase();\n      \n      if (lowerLine.includes('authentication') || lowerLine.includes('login') || lowerLine.includes('sshd')) {\n        category = 'authentication';\n        if (lowerLine.includes('failed') || lowerLine.includes('invalid')) {\n          severity = 'medium';\n        }\n      } else if (lowerLine.includes('firewall') || lowerLine.includes('blocked') || lowerLine.includes('dropped')) {\n        category = 'firewall';\n        severity = 'low';\n      } else if (lowerLine.includes('permission') || lowerLine.includes('denied') || lowerLine.includes('unauthorized')) {\n        category = 'access_denied';\n        severity = 'medium';\n      } else if (lowerLine.includes('error') || lowerLine.includes('failed')) {\n        category = 'error';\n        severity = 'low';\n      }\n      \n      // Extract IP if present\n      const ipMatch = line.match(/(\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3})/);\n      \n      events.push({\n        source: 'loki',\n        category,\n        severity,\n        timestamp: new Date(parseInt(ts) / 1000000).toISOString(),\n        job: labels.job || 'unknown',\n        host: labels.host || labels.instance || 'unknown',\n        sourceIP: ipMatch ? ipMatch[1] : null,\n        message: line.substring(0, 500) // Truncate long messages\n      });\n    }\n  }\n}\n\nreturn [{\n  _source: 'loki',\n  events,\n  totalEvents: events.length,\n  byCategory: events.reduce((acc, e) => {\n    acc[e.category] = (acc[e.category] || 0) + 1;\n    return acc;\n  }, {}),\n  bySeverity: events.reduce((acc, e) => {\n    acc[e.severity] = (acc[e.severity] || 0) + 1;\n    return acc;\n  }, {})\n}];"
+      },
+      "id": "parse-loki",
+      "name": "Parse Loki Events",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Correlate events and detect patterns\n// This node receives input from EITHER Wazuh OR Loki path (not both simultaneously)\nconst inputData = $input.first().json;\n\nconst staticData = $getWorkflowStaticData('global');\nif (!staticData.recentEvents) staticData.recentEvents = [];\nif (!staticData.ipTracker) staticData.ipTracker = {};\nif (!staticData.alertHistory) staticData.alertHistory = [];\n\nconst now = Date.now();\nconst CORRELATION_WINDOW = 15 * 60 * 1000; // 15 minutes\nconst BRUTE_FORCE_THRESHOLD = 5; // Failed attempts\nconst ALERT_COOLDOWN = 30 * 60 * 1000; // 30 minutes\n\n// Determine source based on _source tag added during parsing\nlet newEvents = [];\nlet isWazuhTrigger = false;\n\nif (inputData._source === 'wazuh') {\n  // Data from Wazuh webhook path\n  isWazuhTrigger = true;\n  newEvents.push({\n    source: 'wazuh',\n    eventType: inputData.eventType,\n    severity: inputData.severity,\n    level: inputData.level,\n    agent: inputData.agent,\n    sourceIP: inputData.sourceIP,\n    destIP: inputData.destIP,\n    user: inputData.user,\n    ruleId: inputData.ruleId,\n    groups: inputData.groups,\n    timestamp: inputData.timestamp\n  });\n} else if (inputData._source === 'loki') {\n  // Data from scheduled Loki path\n  if (inputData.events && inputData.events.length > 0) {\n    newEvents = newEvents.concat(inputData.events);\n  }\n}\n\n// Clean old events\nstaticData.recentEvents = staticData.recentEvents.filter(e => \n  new Date(e.timestamp).getTime() > now - CORRELATION_WINDOW\n);\n\n// Add new events\nstaticData.recentEvents = staticData.recentEvents.concat(newEvents);\n\n// Track IPs for brute force detection\nfor (const event of newEvents) {\n  if (event.sourceIP && (event.category === 'authentication' || event.eventType?.includes('auth'))) {\n    if (!staticData.ipTracker[event.sourceIP]) {\n      staticData.ipTracker[event.sourceIP] = { count: 0, firstSeen: now, lastSeen: now };\n    }\n    staticData.ipTracker[event.sourceIP].count++;\n    staticData.ipTracker[event.sourceIP].lastSeen = now;\n  }\n}\n\n// Clean old IP tracking\nfor (const ip of Object.keys(staticData.ipTracker)) {\n  if (staticData.ipTracker[ip].lastSeen < now - CORRELATION_WINDOW) {\n    delete staticData.ipTracker[ip];\n  }\n}\n\n// Detect patterns\nconst alerts = [];\n\n// Pattern 1: Brute force detection\nfor (const [ip, data] of Object.entries(staticData.ipTracker)) {\n  if (data.count >= BRUTE_FORCE_THRESHOLD) {\n    const lastAlert = staticData.alertHistory.find(a => a.type === 'brute_force' && a.ip === ip);\n    if (!lastAlert || (now - lastAlert.time) > ALERT_COOLDOWN) {\n      alerts.push({\n        type: 'brute_force',\n        severity: 'high',\n        title: 'Potential Brute Force Attack',\n        description: `IP ${ip} has ${data.count} failed auth attempts in ${Math.round(CORRELATION_WINDOW / 60000)} minutes`,\n        sourceIP: ip,\n        attemptCount: data.count,\n        recommendation: 'Consider blocking this IP via firewall or fail2ban'\n      });\n      staticData.alertHistory.push({ type: 'brute_force', ip, time: now });\n    }\n  }\n}\n\n// Pattern 2: High severity Wazuh alerts\nif (isWazuhTrigger) {\n  const wazuhEvent = newEvents.find(e => e.source === 'wazuh');\n  if (wazuhEvent && wazuhEvent.level >= 10) {\n    alerts.push({\n      type: 'wazuh_high_severity',\n      severity: wazuhEvent.level >= 12 ? 'critical' : 'high',\n      title: wazuhEvent.eventType,\n      description: `High severity alert (level ${wazuhEvent.level}) from ${wazuhEvent.agent}`,\n      ruleId: wazuhEvent.ruleId,\n      sourceIP: wazuhEvent.sourceIP,\n      recommendation: 'Review Wazuh dashboard for full alert details'\n    });\n  }\n}\n\n// Pattern 3: Unusual activity spike\nconst eventCountByHost = {};\nfor (const event of staticData.recentEvents) {\n  const host = event.host || event.agent || 'unknown';\n  eventCountByHost[host] = (eventCountByHost[host] || 0) + 1;\n}\n\nfor (const [host, count] of Object.entries(eventCountByHost)) {\n  if (count > 50) { // More than 50 events in 15 minutes\n    const lastAlert = staticData.alertHistory.find(a => a.type === 'activity_spike' && a.host === host);\n    if (!lastAlert || (now - lastAlert.time) > ALERT_COOLDOWN) {\n      alerts.push({\n        type: 'activity_spike',\n        severity: 'medium',\n        title: 'Unusual Activity Spike',\n        description: `Host ${host} generated ${count} security events in 15 minutes`,\n        host,\n        eventCount: count,\n        recommendation: 'Check system logs for underlying issues'\n      });\n      staticData.alertHistory.push({ type: 'activity_spike', host, time: now });\n    }\n  }\n}\n\n// Clean old alert history\nstaticData.alertHistory = staticData.alertHistory.filter(a => (now - a.time) < 24 * 60 * 60 * 1000);\n\nreturn [{\n  alerts,\n  hasAlerts: alerts.length > 0,\n  triggerSource: isWazuhTrigger ? 'wazuh' : 'loki',\n  correlationStats: {\n    totalRecentEvents: staticData.recentEvents.length,\n    trackedIPs: Object.keys(staticData.ipTracker).length,\n    eventsByHost: eventCountByHost\n  },\n  timestamp: new Date().toISOString()\n}];"
+      },
+      "id": "correlate-events",
+      "name": "Correlate & Detect Patterns",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "alert-count-check",
+              "leftValue": "={{ $json.alerts.length }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-alerts",
+      "name": "Has Security Alerts?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        880,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Format Slack message for security alerts\nconst data = $input.first().json;\n\nconst severityEmoji = {\n  critical: '\ud83d\udd34',\n  high: '\ud83d\udfe0',\n  medium: '\ud83d\udfe1',\n  low: '\ud83d\udfe2'\n};\n\nconst blocks = [\n  {\n    type: 'header',\n    text: {\n      type: 'plain_text',\n      text: '\ud83d\udd12 Security Alert Correlation',\n      emoji: true\n    }\n  },\n  {\n    type: 'section',\n    text: {\n      type: 'mrkdwn',\n      text: `*${data.alerts.length} correlated alert(s) detected*\\nSource: ${data.triggerSource}`\n    }\n  },\n  { type: 'divider' }\n];\n\nfor (const alert of data.alerts) {\n  const emoji = severityEmoji[alert.severity] || '\u26aa';\n  \n  let details = `${emoji} *${alert.severity.toUpperCase()}: ${alert.title}*\\n${alert.description}`;\n  \n  if (alert.sourceIP) {\n    details += `\\n\u2022 Source IP: \\`${alert.sourceIP}\\``;\n  }\n  if (alert.recommendation) {\n    details += `\\n\u2022 \ud83d\udca1 ${alert.recommendation}`;\n  }\n  \n  blocks.push({\n    type: 'section',\n    text: {\n      type: 'mrkdwn',\n      text: details\n    }\n  });\n}\n\nblocks.push(\n  { type: 'divider' },\n  {\n    type: 'context',\n    elements: [{\n      type: 'mrkdwn',\n      text: `Correlation window: 15min | Events analyzed: ${data.correlationStats.totalRecentEvents} | IPs tracked: ${data.correlationStats.trackedIPs}`\n    }]\n  }\n);\n\nreturn [{\n  blocks,\n  text: `Security Alert: ${data.alerts.length} correlated event(s) detected`\n}];"
+      },
+      "id": "format-alert",
+      "name": "Format Security Alert",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        -100
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SLACK_WEBHOOK_URL }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "id": "slack-alert",
+      "name": "Send Slack Alert",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1320,
+        -100
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://192.168.0.19:3000/api/annotations",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"text\": \"Security correlation: {{ $json.alerts ? $json.alerts.map(a => a.title).join(', ') : 'unknown' }}\",\n  \"tags\": [\"security\", \"correlation\", \"alert\"]\n}",
+        "options": {}
+      },
+      "id": "grafana-annotation",
+      "name": "Create Grafana Annotation",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1540,
+        -100
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "no-alerts",
+      "name": "No Security Alerts",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        1100,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Format alert for AI Operations Assistant\nconst analysisData = $('Correlate & Detect Patterns').first().json;\n\n// Build standardized alert payload\nconst alertPayload = {\n  source: 'security-event-correlator',\n  alert_type: analysisData.alerts[0]?.type || 'security_event',\n  severity: analysisData.alerts.some(a => a.severity === 'critical') ? 'critical' : \n            analysisData.alerts.some(a => a.severity === 'high') ? 'high' : 'medium',\n  title: `Security Alert: ${analysisData.alerts.length} correlated event(s)`,\n  message: analysisData.alerts.map(a => `${a.title}: ${a.description}`).join('; '),\n  context: {\n    trigger_source: analysisData.triggerSource,\n    alerts: analysisData.alerts,\n    correlation_stats: analysisData.correlationStats,\n    threat_level: analysisData.alerts.some(a => a.severity === 'critical') ? 'critical' : 'elevated'\n  },\n  timestamp: new Date().toISOString(),\n  original_alert: analysisData\n};\n\nreturn [alertPayload];"
+      },
+      "id": "format-ai-alert",
+      "name": "Format AI Alert",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1760, -100]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://192.168.0.52:5678/webhook/ai-ops-triage",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "forward-ai-ops",
+      "name": "Forward to AI Triage",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1980, -100],
+      "continueOnFail": true
+    }
+  ],
+  "connections": {
+    "Wazuh Alert Webhook": {
+      "main": [
+        [
+          {
+            "node": "Parse Wazuh Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Every 15 Minutes": {
+      "main": [
+        [
+          {
+            "node": "Query Loki Logs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Wazuh Alert": {
+      "main": [
+        [
+          {
+            "node": "Correlate & Detect Patterns",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Query Loki Logs": {
+      "main": [
+        [
+          {
+            "node": "Parse Loki Events",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Loki Events": {
+      "main": [
+        [
+          {
+            "node": "Correlate & Detect Patterns",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Correlate & Detect Patterns": {
+      "main": [
+        [
+          {
+            "node": "Has Security Alerts?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Security Alerts?": {
+      "main": [
+        [
+          {
+            "node": "Format Security Alert",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "No Security Alerts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Security Alert": {
+      "main": [
+        [
+          {
+            "node": "Send Slack Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Slack Alert": {
+      "main": [
+        [
+          {
+            "node": "Create Grafana Annotation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Grafana Annotation": {
+      "main": [
+        [
+          {
+            "node": "Format AI Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format AI Alert": {
+      "main": [
+        [
+          {
+            "node": "Forward to AI Triage",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": {
+    "global": {
+      "recentEvents": [],
+      "ipTracker": {},
+      "alertHistory": []
+    }
+  },
+  "tags": [
+    {
+      "name": "security"
+    },
+    {
+      "name": "wazuh"
+    },
+    {
+      "name": "correlation"
+    },
+    {
+      "name": "homelab"
+    }
+  ],
+  "triggerCount": 2,
+  "updatedAt": "2025-12-29T00:00:00.000Z",
+  "versionId": "2"
+}

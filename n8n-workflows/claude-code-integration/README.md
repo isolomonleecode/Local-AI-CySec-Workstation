@@ -1,6 +1,6 @@
 # Claude Code Integration for n8n
 
-Three n8n workflows that integrate Claude Code (Anthropic's API) with Telegram, Slack, and Discord for real-time AI coding assistance.
+n8n workflows that integrate Claude Code with Telegram, Slack, and Discord for real-time AI coding assistance.
 
 ## 📋 Overview
 
@@ -10,7 +10,67 @@ These workflows allow you to interact with Claude Code directly from your favori
 - **Slack**: Mention your bot in channels or DM it for assistance
 - **Discord**: Mention your bot in servers for coding support
 
-All workflows use Claude Sonnet 4.5 for high-quality responses with code syntax highlighting and markdown formatting.
+### Workflow Versions
+
+| Workflow | Method | Features |
+|----------|--------|----------|
+| `01-telegram-claude-code.json` | Anthropic API | Basic chat, Telegram polling |
+| `02-slack-claude-code.json` | Anthropic API | Basic chat, Slack Events |
+| **`02-slack-claude-code-v2.json`** | **SSH to Claude CLI** | **Full tool access, persistent sessions, slash commands** |
+| `03-discord-claude-code.json` | Anthropic API | Basic chat, Discord webhook |
+
+## 🆕 Slack Claude Code v2 (SSH-Based)
+
+The v2 workflow uses SSH to execute the Claude Code CLI directly, providing the **full Claude Code experience** from Slack:
+
+### Features
+- ✅ Full Claude Code CLI with tool access (file ops, bash, MCP servers)
+- ✅ Persistent sessions via `--resume` flag
+- ✅ Slash commands: `/help`, `/clear`, `/model`, `/system`, `/sessions`
+- ✅ Thread-aware responses
+- ✅ No API keys exposed to external services
+
+### Architecture
+```
+Slack Message → Webhook → n8n → SSH to Workstation → Claude CLI → Response
+```
+
+### Setup Requirements
+1. **Slack App** with Events API (message.channels scope)
+2. **SSH credential** in n8n pointing to your workstation
+3. **Claude Code CLI** installed on the target machine
+4. **Tailscale Funnel** (or other method) for external webhook URL
+5. **WEBHOOK_URL** environment variable set in n8n container
+
+### Configuration Steps
+
+1. **Import workflow** into n8n
+2. **Update SSH nodes** - Select your SSH credential on:
+   - "SSH Execute Claude CLI" node
+   - "SSH List Sessions" node
+3. **Update session ID** in "Extract & Detect Commands" node:
+   ```javascript
+   const sessionId = 'YOUR_CLAUDE_SESSION_ID';  // Use: claude /sessions
+   ```
+4. **Update SSH cwd** path in both SSH nodes to your project directory
+5. **Configure Slack Events API** with your webhook URL:
+   - URL: `https://your-domain/webhook/slack-claude-v2`
+   - Events: `message.channels`, `app_mention`
+6. **Activate** the workflow
+
+### Slash Commands
+
+| Command | Description |
+|---------|-------------|
+| `/help` | Show available commands |
+| `/clear` | Clear thread settings |
+| `/model [sonnet\|opus\|haiku]` | Switch Claude model |
+| `/system [prompt]` | Set custom system prompt |
+| `/sessions` | List Claude CLI sessions |
+
+---
+
+## Original Workflows (API-Based)
 
 ## 🚀 Features
 

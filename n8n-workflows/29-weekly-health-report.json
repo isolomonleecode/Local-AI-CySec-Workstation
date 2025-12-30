@@ -1,0 +1,374 @@
+{
+  "name": "Weekly Health Report",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "weeks",
+              "triggerAtDay": [0],
+              "triggerAtHour": 8
+            }
+          ]
+        }
+      },
+      "id": "weekly-schedule",
+      "name": "Sunday 8 AM",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "http://192.168.0.19:9090/api/v1/query",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "query",
+              "value": "avg_over_time(100 - (avg by(instance) (rate(node_cpu_seconds_total{mode=\"idle\"}[1h])) * 100)[7d:1h])"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "query-cpu-week",
+      "name": "Query Weekly CPU",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [220, -200]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "http://192.168.0.19:9090/api/v1/query",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "query",
+              "value": "avg_over_time((1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) * 100[7d:1h])"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "query-memory-week",
+      "name": "Query Weekly Memory",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [220, -50]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "http://192.168.0.19:9090/api/v1/query",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "query",
+              "value": "(1 - node_filesystem_avail_bytes{mountpoint=~\"/|/mnt/.*\"} / node_filesystem_size_bytes{mountpoint=~\"/|/mnt/.*\"}) * 100"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "query-disk-current",
+      "name": "Query Current Disk",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [220, 100]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "http://192.168.0.19:9090/api/v1/query",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "query",
+              "value": "sum(increase(node_network_receive_bytes_total[7d])) by (instance)"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "query-network-week",
+      "name": "Query Weekly Network",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [220, 250]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "http://192.168.0.19:9090/api/v1/query",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "query",
+              "value": "count(container_last_seen{job=\"cadvisor\"})"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "query-containers",
+      "name": "Query Container Count",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [220, 400]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "http://192.168.0.19/admin/api.php",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "summaryRaw",
+              "value": ""
+            }
+          ]
+        },
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "query-pihole",
+      "name": "Query Pi-hole Stats",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [220, 550]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Compile weekly health report\nconst cpuData = $('Query Weekly CPU').first().json;\nconst memoryData = $('Query Weekly Memory').first().json;\nconst diskData = $('Query Current Disk').first().json;\nconst networkData = $('Query Weekly Network').first().json;\nconst containerData = $('Query Container Count').first().json;\nconst piholeData = $('Query Pi-hole Stats').first().json;\n\nconst report = {\n  generatedAt: new Date().toISOString(),\n  period: '7 days',\n  sections: {}\n};\n\n// Resource utilization section\nconst resourceStats = {\n  cpu: [],\n  memory: [],\n  disk: []\n};\n\nif (cpuData?.data?.result) {\n  for (const metric of cpuData.data.result) {\n    resourceStats.cpu.push({\n      instance: metric.metric?.instance || 'unknown',\n      avgUsage: parseFloat(metric.value?.[1] || 0).toFixed(1)\n    });\n  }\n}\n\nif (memoryData?.data?.result) {\n  for (const metric of memoryData.data.result) {\n    resourceStats.memory.push({\n      instance: metric.metric?.instance || 'unknown',\n      avgUsage: parseFloat(metric.value?.[1] || 0).toFixed(1)\n    });\n  }\n}\n\nif (diskData?.data?.result) {\n  for (const metric of diskData.data.result) {\n    resourceStats.disk.push({\n      instance: metric.metric?.instance || 'unknown',\n      mountpoint: metric.metric?.mountpoint || '/',\n      usage: parseFloat(metric.value?.[1] || 0).toFixed(1)\n    });\n  }\n}\n\nreport.sections.resources = resourceStats;\n\n// Network section\nconst networkStats = [];\nif (networkData?.data?.result) {\n  for (const metric of networkData.data.result) {\n    const bytes = parseFloat(metric.value?.[1] || 0);\n    networkStats.push({\n      instance: metric.metric?.instance || 'unknown',\n      totalReceived: (bytes / (1024 * 1024 * 1024)).toFixed(2) + ' GB'\n    });\n  }\n}\nreport.sections.network = networkStats;\n\n// Container section\nreport.sections.containers = {\n  totalRunning: containerData?.data?.result?.[0]?.value?.[1] || 0\n};\n\n// DNS/Pi-hole section\nreport.sections.dns = {\n  totalQueries: piholeData?.dns_queries_today || 0,\n  blockedQueries: piholeData?.ads_blocked_today || 0,\n  blockedPercent: (piholeData?.ads_percentage_today || 0).toFixed(1),\n  uniqueClients: piholeData?.unique_clients || 0,\n  domainsBlocked: piholeData?.domains_being_blocked || 0\n};\n\n// Health score calculation\nlet healthScore = 100;\nconst issues = [];\n\n// Check CPU\nfor (const cpu of resourceStats.cpu) {\n  if (parseFloat(cpu.avgUsage) > 80) {\n    healthScore -= 10;\n    issues.push(`High avg CPU on ${cpu.instance}: ${cpu.avgUsage}%`);\n  }\n}\n\n// Check Memory\nfor (const mem of resourceStats.memory) {\n  if (parseFloat(mem.avgUsage) > 85) {\n    healthScore -= 10;\n    issues.push(`High avg memory on ${mem.instance}: ${mem.avgUsage}%`);\n  }\n}\n\n// Check Disk\nfor (const disk of resourceStats.disk) {\n  if (parseFloat(disk.usage) > 90) {\n    healthScore -= 15;\n    issues.push(`Critical disk usage on ${disk.mountpoint}: ${disk.usage}%`);\n  } else if (parseFloat(disk.usage) > 80) {\n    healthScore -= 5;\n    issues.push(`High disk usage on ${disk.mountpoint}: ${disk.usage}%`);\n  }\n}\n\nreport.healthScore = Math.max(0, healthScore);\nreport.issues = issues;\nreport.overallStatus = healthScore >= 90 ? 'Excellent' : healthScore >= 70 ? 'Good' : healthScore >= 50 ? 'Fair' : 'Needs Attention';\n\nreturn [report];"
+      },
+      "id": "compile-report",
+      "name": "Compile Weekly Report",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [500, 175]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Format comprehensive Slack report\nconst report = $input.first().json;\n\nconst statusEmoji = {\n  'Excellent': '🌟',\n  'Good': '✅',\n  'Fair': '⚠️',\n  'Needs Attention': '🔴'\n};\n\nconst blocks = [\n  {\n    type: 'header',\n    text: {\n      type: 'plain_text',\n      text: '📊 Weekly Homelab Health Report',\n      emoji: true\n    }\n  },\n  {\n    type: 'section',\n    text: {\n      type: 'mrkdwn',\n      text: `${statusEmoji[report.overallStatus]} *Overall Status: ${report.overallStatus}*\\n*Health Score:* ${report.healthScore}/100\\n*Report Period:* Last 7 days`\n    }\n  },\n  { type: 'divider' },\n  {\n    type: 'section',\n    text: {\n      type: 'mrkdwn',\n      text: '*🖥️ Resource Utilization (7-day avg)*'\n    }\n  }\n];\n\n// CPU stats\nif (report.sections.resources.cpu.length > 0) {\n  const cpuText = report.sections.resources.cpu\n    .map(c => `• ${c.instance}: ${c.avgUsage}%`)\n    .join('\\n');\n  blocks.push({\n    type: 'section',\n    text: {\n      type: 'mrkdwn',\n      text: `*CPU*\\n${cpuText}`\n    }\n  });\n}\n\n// Memory stats\nif (report.sections.resources.memory.length > 0) {\n  const memText = report.sections.resources.memory\n    .map(m => `• ${m.instance}: ${m.avgUsage}%`)\n    .join('\\n');\n  blocks.push({\n    type: 'section',\n    text: {\n      type: 'mrkdwn',\n      text: `*Memory*\\n${memText}`\n    }\n  });\n}\n\n// Disk stats\nif (report.sections.resources.disk.length > 0) {\n  const diskText = report.sections.resources.disk\n    .slice(0, 5) // Limit to 5 mountpoints\n    .map(d => `• ${d.mountpoint}: ${d.usage}%`)\n    .join('\\n');\n  blocks.push({\n    type: 'section',\n    text: {\n      type: 'mrkdwn',\n      text: `*Disk*\\n${diskText}`\n    }\n  });\n}\n\nblocks.push({ type: 'divider' });\n\n// Containers & DNS\nblocks.push({\n  type: 'section',\n  fields: [\n    {\n      type: 'mrkdwn',\n      text: `*🐳 Containers*\\nRunning: ${report.sections.containers.totalRunning}`\n    },\n    {\n      type: 'mrkdwn',\n      text: `*🛡️ Pi-hole*\\nBlocked: ${report.sections.dns.blockedPercent}%\\nQueries: ${report.sections.dns.totalQueries}`\n    }\n  ]\n});\n\n// Network\nif (report.sections.network.length > 0) {\n  const netText = report.sections.network\n    .map(n => `• ${n.instance}: ${n.totalReceived} received`)\n    .join('\\n');\n  blocks.push({\n    type: 'section',\n    text: {\n      type: 'mrkdwn',\n      text: `*🌐 Network (7-day total)*\\n${netText}`\n    }\n  });\n}\n\n// Issues section\nif (report.issues.length > 0) {\n  blocks.push(\n    { type: 'divider' },\n    {\n      type: 'section',\n      text: {\n        type: 'mrkdwn',\n        text: `*⚠️ Issues Detected*\\n${report.issues.map(i => `• ${i}`).join('\\n')}`\n      }\n    }\n  );\n}\n\nblocks.push({\n  type: 'context',\n  elements: [{\n    type: 'mrkdwn',\n    text: `Generated at ${new Date().toLocaleString()} | Powered by n8n + Prometheus`\n  }]\n});\n\nreturn [{\n  blocks,\n  text: `Weekly Health Report: ${report.overallStatus} (Score: ${report.healthScore}/100)`\n}];"
+      },
+      "id": "format-report",
+      "name": "Format Slack Report",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [720, 175]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SLACK_DIGEST_WEBHOOK_URL || $env.SLACK_WEBHOOK_URL }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "id": "slack-report",
+      "name": "Send Weekly Report",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [940, 175]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://192.168.0.19:3000/api/annotations",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"text\": \"Weekly Health Report: {{ $('Compile Weekly Report').first().json.overallStatus }} (Score: {{ $('Compile Weekly Report').first().json.healthScore }}/100)\",\n  \"tags\": [\"weekly\", \"health\", \"report\"]\n}",
+        "options": {}
+      },
+      "id": "grafana-annotation",
+      "name": "Create Grafana Annotation",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1160, 175]
+    }
+  ],
+  "connections": {
+    "Sunday 8 AM": {
+      "main": [
+        [
+          {
+            "node": "Query Weekly CPU",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Query Weekly Memory",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Query Current Disk",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Query Weekly Network",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Query Container Count",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Query Pi-hole Stats",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Query Weekly CPU": {
+      "main": [
+        [
+          {
+            "node": "Compile Weekly Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Query Weekly Memory": {
+      "main": [
+        [
+          {
+            "node": "Compile Weekly Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Query Current Disk": {
+      "main": [
+        [
+          {
+            "node": "Compile Weekly Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Query Weekly Network": {
+      "main": [
+        [
+          {
+            "node": "Compile Weekly Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Query Container Count": {
+      "main": [
+        [
+          {
+            "node": "Compile Weekly Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Query Pi-hole Stats": {
+      "main": [
+        [
+          {
+            "node": "Compile Weekly Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compile Weekly Report": {
+      "main": [
+        [
+          {
+            "node": "Format Slack Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Slack Report": {
+      "main": [
+        [
+          {
+            "node": "Send Weekly Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Weekly Report": {
+      "main": [
+        [
+          {
+            "node": "Create Grafana Annotation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": [
+    {
+      "name": "reporting"
+    },
+    {
+      "name": "weekly"
+    },
+    {
+      "name": "homelab"
+    }
+  ],
+  "triggerCount": 1,
+  "updatedAt": "2025-12-27T00:00:00.000Z",
+  "versionId": "1"
+}

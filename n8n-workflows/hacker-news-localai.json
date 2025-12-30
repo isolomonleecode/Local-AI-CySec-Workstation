@@ -1,0 +1,709 @@
+{
+  "name": "Hacker News to Video - LocalAI Version",
+  "nodes": [
+    {
+      "id": "trigger-manual",
+      "name": "When clicking 'Test workflow'",
+      "type": "n8n-nodes-base.manualTrigger",
+      "position": [-320, 300],
+      "parameters": {},
+      "typeVersion": 1
+    },
+    {
+      "id": "hacker-news",
+      "name": "Hacker News",
+      "type": "n8n-nodes-base.hackerNews",
+      "position": [-20, 300],
+      "parameters": {
+        "resource": "all",
+        "additionalFields": {}
+      },
+      "typeVersion": 1
+    },
+    {
+      "id": "limit-articles",
+      "name": "Limit",
+      "type": "n8n-nodes-base.limit",
+      "position": [240, 300],
+      "parameters": {
+        "keep": "lastItems",
+        "maxItems": 1
+      },
+      "typeVersion": 1
+    },
+    {
+      "id": "loop-items",
+      "name": "Loop Over Items",
+      "type": "n8n-nodes-base.splitInBatches",
+      "position": [440, 300],
+      "parameters": {
+        "options": {}
+      },
+      "typeVersion": 3
+    },
+    {
+      "id": "fetch-article",
+      "name": "Fetch Article Content",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [640, 300],
+      "parameters": {
+        "url": "={{ $json.url }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "typeVersion": 4.2
+    },
+    {
+      "id": "extract-text",
+      "name": "Extract Article Text",
+      "type": "n8n-nodes-base.code",
+      "position": [840, 300],
+      "parameters": {
+        "jsCode": "// Extract text from HTML and escape for JSON\nconst html = $input.first().json.data || $input.first().json.body || '';\nconst title = ($('Hacker News').first().json.title || 'Unknown').replace(/\"/g, \"'\");\nconst url = $('Hacker News').first().json.url || '';\n\n// Simple HTML to text conversion\nlet text = html\n  .replace(/<script[^>]*>[\\s\\S]*?<\\/script>/gi, '')\n  .replace(/<style[^>]*>[\\s\\S]*?<\\/style>/gi, '')\n  .replace(/<[^>]+>/g, ' ')\n  .replace(/\\s+/g, ' ')\n  .trim()\n  .substring(0, 4000);\n\n// Escape special characters for JSON embedding\nlet escaped = text\n  .replace(/\\\\/g, '\\\\\\\\')\n  .replace(/\"/g, '\\\\\"')\n  .replace(/\\n/g, ' ')\n  .replace(/\\r/g, '')\n  .replace(/\\t/g, ' ')\n  .replace(/[\\x00-\\x1F\\x7F]/g, '');\n\n// If content is minimal, indicate to use title for analysis\nconst contentMinimal = escaped.length < 200;\n\nreturn [{\n  json: {\n    url: url,\n    title: title,\n    articleText: escaped,\n    contentMinimal: contentMinimal,\n    analysisHint: contentMinimal ? 'Content could not be extracted (JS-rendered page). Analyze based on TITLE and URL only.' : ''\n  }\n}];"
+      },
+      "typeVersion": 2
+    },
+    {
+      "id": "localai-analysis",
+      "name": "LocalAI - Article Analysis",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [1040, 300],
+      "parameters": {
+        "url": "http://192.168.0.52:8080/v1/chat/completions",
+        "method": "POST",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"llama-3.1-8b-instruct\",\n  \"messages\": [\n    {\n      \"role\": \"system\",\n      \"content\": \"You are a content analyst for tech news. Summarize articles and identify key topics. If content is minimal or empty, use the TITLE and URL to make your best guess. Output ONLY valid JSON.\"\n    },\n    {\n      \"role\": \"user\",\n      \"content\": \"Analyze this article and respond with JSON only:\\n\\nTitle: {{ $json.title }}\\nURL: {{ $json.url }}\\n{{ $json.analysisHint }}\\n\\nContent: {{ $json.articleText }}\\n\\nRespond with this exact JSON format:\\n{\\n  \\\"summary\\\": \\\"250 word summary of the article (or best guess from title)\\\",\\n  \\\"interest_score\\\": 1-10,\\n  \\\"key_topics\\\": [\\\"topic1\\\", \\\"topic2\\\", \\\"topic3\\\"]\\n}\"\n    }\n  ],\n  \"max_tokens\": 800,\n  \"temperature\": 0.3\n}",
+        "options": {}
+      },
+      "typeVersion": 4.2
+    },
+    {
+      "id": "parse-analysis",
+      "name": "Parse Analysis Response",
+      "type": "n8n-nodes-base.code",
+      "position": [1240, 300],
+      "parameters": {
+        "jsCode": "// Parse LocalAI response\nconst response = $input.first().json;\nconst content = response.choices?.[0]?.message?.content || '{}';\nconst title = $('Extract Article Text').first().json.title;\n\nlet parsed;\ntry {\n  const jsonMatch = content.match(/\\{[\\s\\S]*\\}/);\n  parsed = JSON.parse(jsonMatch ? jsonMatch[0] : content);\n} catch (e) {\n  parsed = {\n    summary: 'Article about: ' + title,\n    interest_score: 5,\n    key_topics: ['tech', 'news']\n  };\n}\n\nreturn [{\n  json: {\n    url: $('Extract Article Text').first().json.url,\n    title: title,\n    articleText: $('Extract Article Text').first().json.articleText,\n    analysis: parsed\n  }\n}];"
+      },
+      "typeVersion": 2
+    },
+    {
+      "id": "if-relevant",
+      "name": "If AI/Automation Related",
+      "type": "n8n-nodes-base.if",
+      "position": [1440, 300],
+      "parameters": {
+        "options": {},
+        "conditions": {
+          "options": {
+            "version": 2,
+            "caseSensitive": false,
+            "typeValidation": "loose"
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "check-related",
+              "operator": {
+                "name": "filter.operator.equals",
+                "type": "string",
+                "operation": "equals"
+              },
+              "leftValue": "={{ $json.analysis.related }}",
+              "rightValue": "yes"
+            }
+          ]
+        }
+      },
+      "typeVersion": 2.2
+    },
+    {
+      "id": "localai-content-prep",
+      "name": "LocalAI - Content Prep",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [1640, 200],
+      "parameters": {
+        "url": "http://192.168.0.52:8080/v1/chat/completions",
+        "method": "POST",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"llama-3.1-8b-instruct\",\n  \"messages\": [\n    {\n      \"role\": \"system\",\n      \"content\": \"You are a content creator for a tech/news YouTube channel. Create engaging video content from any article. Output ONLY valid JSON.\"\n    },\n    {\n      \"role\": \"user\",\n      \"content\": \"Create video content from this article:\\n\\nTitle: {{ $json.title }}\\nTopics: {{ $json.analysis.key_topics }}\\nSummary: {{ $json.analysis.summary }}\\n\\nRespond with this exact JSON format:\\n{\\n  \\\"article_title\\\": \\\"Catchy YouTube title under 60 characters\\\",\\n  \\\"article_blurb\\\": \\\"Engaging hook under 15 words\\\",\\n  \\\"summary_blurb_1\\\": \\\"Key insight 1 under 15 words\\\",\\n  \\\"summary_blurb_2\\\": \\\"Key insight 2 under 15 words\\\",\\n  \\\"image_prompt_1\\\": \\\"Cinematic visual for insight 1, under 15 words, NO TEXT OR LABELS\\\",\\n  \\\"image_prompt_2\\\": \\\"Cinematic visual for insight 2, under 15 words, NO TEXT OR LABELS\\\"\\n}\"\n    }\n  ],\n  \"max_tokens\": 500,\n  \"temperature\": 0.7\n}",
+        "options": {}
+      },
+      "typeVersion": 4.2
+    },
+    {
+      "id": "parse-content",
+      "name": "Parse Content Response",
+      "type": "n8n-nodes-base.code",
+      "position": [1840, 200],
+      "parameters": {
+        "jsCode": "// Parse LocalAI content prep response\nconst response = $input.first().json;\nconst content = response.choices?.[0]?.message?.content || '{}';\n\nlet parsed;\ntry {\n  const jsonMatch = content.match(/\\{[\\s\\S]*\\}/);\n  parsed = JSON.parse(jsonMatch ? jsonMatch[0] : content);\n} catch (e) {\n  parsed = {\n    article_title: $('Parse Analysis Response').first().json.title,\n    article_blurb: 'Check out this AI news!',\n    summary_blurb_1: 'Key insight about AI technology',\n    summary_blurb_2: 'What this means for the future',\n    image_prompt_1: 'Futuristic technology concept, cinematic lighting',\n    image_prompt_2: 'Innovation and progress, abstract digital art'\n  };\n}\n\nreturn [{\n  json: {\n    ...parsed,\n    original_url: $('Parse Analysis Response').first().json.url,\n    original_title: $('Parse Analysis Response').first().json.title,\n    analysis: $('Parse Analysis Response').first().json.analysis\n  }\n}];"
+      },
+      "typeVersion": 2
+    },
+    {
+      "id": "set-video-data",
+      "name": "Prepare Video Data",
+      "type": "n8n-nodes-base.set",
+      "position": [2040, 200],
+      "parameters": {
+        "options": {},
+        "assignments": {
+          "assignments": [
+            {
+              "id": "title",
+              "name": "video_title",
+              "type": "string",
+              "value": "={{ $json.article_title }}"
+            },
+            {
+              "id": "blurb",
+              "name": "video_blurb",
+              "type": "string",
+              "value": "={{ $json.article_blurb }}"
+            },
+            {
+              "id": "summary1",
+              "name": "summary_1",
+              "type": "string",
+              "value": "={{ $json.summary_blurb_1 }}"
+            },
+            {
+              "id": "summary2",
+              "name": "summary_2",
+              "type": "string",
+              "value": "={{ $json.summary_blurb_2 }}"
+            },
+            {
+              "id": "prompt1",
+              "name": "image_prompt_1",
+              "type": "string",
+              "value": "={{ $json.image_prompt_1 }}"
+            },
+            {
+              "id": "prompt2",
+              "name": "image_prompt_2",
+              "type": "string",
+              "value": "={{ $json.image_prompt_2 }}"
+            },
+            {
+              "id": "source",
+              "name": "source_url",
+              "type": "string",
+              "value": "={{ $json.original_url }}"
+            }
+          ]
+        }
+      },
+      "typeVersion": 3.4
+    },
+    {
+      "id": "leo-improve-prompt1",
+      "name": "Leo - Improve Prompt 1",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [2240, 100],
+      "parameters": {
+        "url": "https://cloud.leonardo.ai/api/rest/v1/prompt/improve",
+        "method": "POST",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true
+            }
+          }
+        },
+        "jsonBody": "={\n  \"prompt\": \"{{ $json.image_prompt_1 }}\"\n}",
+        "sendBody": true,
+        "sendHeaders": true,
+        "specifyBody": "json",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpCustomAuth",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "accept",
+              "value": "application/json"
+            }
+          ]
+        }
+      },
+      "typeVersion": 4.2
+    },
+    {
+      "id": "leo-generate-image1",
+      "name": "Leo - Generate Image 1",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [2440, 100],
+      "parameters": {
+        "url": "https://cloud.leonardo.ai/api/rest/v1/generations",
+        "method": "POST",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true
+            }
+          }
+        },
+        "jsonBody": "={\n  \"alchemy\": true,\n  \"width\": 1024,\n  \"height\": 768,\n  \"modelId\": \"6b645e3a-d64f-4341-a6d8-7a3690fbf042\",\n  \"num_images\": 1,\n  \"presetStyle\": \"CINEMATIC\",\n  \"prompt\": \"{{ $json.body.promptGeneration.prompt }}; Cinematic, rule of thirds, dramatic lighting. DO NOT INCLUDE ANY WORDS OR LABELS.\",\n  \"guidance_scale\": 7,\n  \"highResolution\": true,\n  \"public\": false\n}",
+        "sendBody": true,
+        "sendHeaders": true,
+        "specifyBody": "json",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpCustomAuth",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "accept",
+              "value": "application/json"
+            }
+          ]
+        }
+      },
+      "typeVersion": 4.2
+    },
+    {
+      "id": "wait-image1",
+      "name": "Wait for Image 1",
+      "type": "n8n-nodes-base.wait",
+      "position": [2640, 100],
+      "webhookId": "wait-img-1",
+      "parameters": {
+        "amount": 30
+      },
+      "typeVersion": 1.1
+    },
+    {
+      "id": "leo-get-image1",
+      "name": "Leo - Get Image 1",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [2840, 100],
+      "parameters": {
+        "url": "=https://cloud.leonardo.ai/api/rest/v1/generations/{{ $json.body.sdGenerationJob.generationId }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true
+            }
+          }
+        },
+        "sendHeaders": true,
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpCustomAuth",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "content-type",
+              "value": "application/json"
+            }
+          ]
+        }
+      },
+      "typeVersion": 4.2
+    },
+    {
+      "id": "runway-create-video1",
+      "name": "Runway - Create Video 1",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [3040, 100],
+      "parameters": {
+        "url": "https://api.dev.runwayml.com/v1/image_to_video",
+        "method": "POST",
+        "options": {},
+        "sendBody": true,
+        "sendHeaders": true,
+        "authentication": "genericCredentialType",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "promptImage",
+              "value": "={{ $json.body.generations_by_pk.generated_images[0].url }}"
+            },
+            {
+              "name": "promptText",
+              "value": "Slow cinematic motion, atmospheric"
+            },
+            {
+              "name": "model",
+              "value": "gen3a_turbo"
+            }
+          ]
+        },
+        "genericAuthType": "httpCustomAuth",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Runway-Version",
+              "value": "2024-11-06"
+            }
+          ]
+        }
+      },
+      "typeVersion": 4.2
+    },
+    {
+      "id": "wait-video1",
+      "name": "Wait for Video 1",
+      "type": "n8n-nodes-base.wait",
+      "position": [3240, 100],
+      "webhookId": "wait-vid-1",
+      "parameters": {
+        "unit": "minutes",
+        "amount": 3
+      },
+      "typeVersion": 1.1
+    },
+    {
+      "id": "runway-get-video1",
+      "name": "Runway - Get Video 1",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [3440, 100],
+      "parameters": {
+        "url": "=https://api.dev.runwayml.com/v1/tasks/{{ $json.id }}",
+        "options": {},
+        "sendHeaders": true,
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpCustomAuth",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Runway-Version",
+              "value": "2024-11-06"
+            }
+          ]
+        }
+      },
+      "typeVersion": 4.2
+    },
+    {
+      "id": "collect-results",
+      "name": "Collect Video Results",
+      "type": "n8n-nodes-base.code",
+      "position": [3640, 100],
+      "parameters": {
+        "jsCode": "// Collect generated images for manual video creation\nconst videoData = $('Prepare Video Data').first().json;\nconst imageData = $('Leo - Get Image 1').first().json;\nconst imageUrl = imageData?.body?.generations_by_pk?.generated_images?.[0]?.url || 'Image generation failed';\n\nreturn [{\n  json: {\n    status: 'ready_for_manual_video',\n    video_title: videoData.video_title,\n    video_blurb: videoData.video_blurb,\n    summary_1: videoData.summary_1,\n    summary_2: videoData.summary_2,\n    source_url: videoData.source_url,\n    image_url: imageUrl,\n    image_prompt: videoData.image_prompt_1,\n    video_prompt: 'Slow cinematic motion, atmospheric',\n    created_at: new Date().toISOString()\n  }\n}];"
+      },
+      "typeVersion": 2
+    },
+    {
+      "id": "telegram-review",
+      "name": "Send to Review Queue",
+      "type": "n8n-nodes-base.telegram",
+      "position": [3840, 100],
+      "parameters": {
+        "chatId": "YOUR_TELEGRAM_CHAT_ID",
+        "text": "=🎬 **New Content Ready for Manual Video**\n\n**Title:** {{ $json.video_title }}\n\n**Blurb:** {{ $json.video_blurb }}\n\n**Key Points:**\n• {{ $json.summary_1 }}\n• {{ $json.summary_2 }}\n\n📸 **Generated Image:**\n{{ $json.image_url }}\n\n🎥 **Video Prompt for RunwayML:**\n{{ $json.video_prompt }}\n\n📝 **Steps:**\n1. Copy image URL above\n2. Open RunwayML web: https://app.runwayml.com\n3. Create Image-to-Video (gen3a_turbo)\n4. Use prompt: \"{{ $json.video_prompt }}\"\n5. Download and upload to YouTube\n\n**Source:** {{ $json.source_url }}\n\n---\nGenerated: {{ $json.created_at }}",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "typeVersion": 1.2
+    },
+    {
+      "id": "sticky-localai",
+      "name": "LocalAI Integration Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [-620, -40],
+      "parameters": {
+        "color": 4,
+        "width": 350,
+        "height": 400,
+        "content": "# LocalAI Version (Manual Video)\n\n**Modified by:** Claude Code\n**Based on:** AlexK1919 Hacker News Template\n\n## Changes from Original:\n1. ✅ Replaced OpenAI with LocalAI (llama-3.1-8b)\n2. ✅ Simplified article analysis pipeline\n3. ✅ Added Telegram review queue\n4. ✅ Leonardo.ai for image generation\n5. 🔧 Manual video via RunwayML web (free credits)\n\n## Workflow:\nHN → LocalAI Analysis → Content Prep → Leonardo Images → Telegram (with image + instructions for manual video)\n\n## Cost Savings:\n- LLM costs: $0\n- Image gen: Leonardo free tier\n- Video gen: RunwayML web (free credits)\n\n## To Configure:\n1. Set Telegram chat ID\n2. Add Leonardo.ai credentials"
+      },
+      "typeVersion": 1
+    },
+    {
+      "id": "sticky-credentials",
+      "name": "Credentials Needed",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [2240, -150],
+      "parameters": {
+        "color": 7,
+        "width": 400,
+        "height": 200,
+        "content": "# Required Credentials\n\n1. **Leonardo.ai API** (httpCustomAuth)\n   - Header: Authorization\n   - Value: Bearer YOUR_API_KEY\n\n2. **Telegram Bot** (telegram)\n   - Bot token + Chat ID\n\n**Note:** RunwayML video generation is now manual via web interface (free credits)"
+      },
+      "typeVersion": 1
+    }
+  ],
+  "connections": {
+    "When clicking 'Test workflow'": {
+      "main": [
+        [
+          {
+            "node": "Hacker News",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Hacker News": {
+      "main": [
+        [
+          {
+            "node": "Limit",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Limit": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Items": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Fetch Article Content",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Article Content": {
+      "main": [
+        [
+          {
+            "node": "Extract Article Text",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Article Text": {
+      "main": [
+        [
+          {
+            "node": "LocalAI - Article Analysis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LocalAI - Article Analysis": {
+      "main": [
+        [
+          {
+            "node": "Parse Analysis Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Analysis Response": {
+      "main": [
+        [
+          {
+            "node": "LocalAI - Content Prep",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If AI/Automation Related": {
+      "main": [
+        [
+          {
+            "node": "LocalAI - Content Prep",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LocalAI - Content Prep": {
+      "main": [
+        [
+          {
+            "node": "Parse Content Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Content Response": {
+      "main": [
+        [
+          {
+            "node": "Prepare Video Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Video Data": {
+      "main": [
+        [
+          {
+            "node": "Leo - Improve Prompt 1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Leo - Improve Prompt 1": {
+      "main": [
+        [
+          {
+            "node": "Leo - Generate Image 1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Leo - Generate Image 1": {
+      "main": [
+        [
+          {
+            "node": "Wait for Image 1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait for Image 1": {
+      "main": [
+        [
+          {
+            "node": "Leo - Get Image 1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Leo - Get Image 1": {
+      "main": [
+        [
+          {
+            "node": "Collect Video Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Runway - Create Video 1": {
+      "main": [
+        [
+          {
+            "node": "Wait for Video 1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait for Video 1": {
+      "main": [
+        [
+          {
+            "node": "Runway - Get Video 1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Runway - Get Video 1": {
+      "main": [
+        [
+          {
+            "node": "Collect Video Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Collect Video Results": {
+      "main": [
+        [
+          {
+            "node": "Send to Review Queue",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send to Review Queue": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": [
+    {
+      "name": "LocalAI"
+    },
+    {
+      "name": "Video"
+    },
+    {
+      "name": "Hacker News"
+    }
+  ]
+}

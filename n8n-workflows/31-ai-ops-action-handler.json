@@ -1,0 +1,656 @@
+{
+  "name": "AI Operations Action Handler",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "ai-ops-action",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Action Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [0, 0],
+      "webhookId": "ai-ops-action"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse Slack interactive message payload\nconst input = $input.first().json;\n\n// Slack sends payload in body.payload as JSON string\nlet payload = {};\nif (input.body && input.body.payload) {\n  payload = JSON.parse(input.body.payload);\n} else if (input.payload) {\n  payload = typeof input.payload === 'string' ? JSON.parse(input.payload) : input.payload;\n} else {\n  payload = input;\n}\n\n// Extract action details\nconst action = (payload.actions && payload.actions[0]) || {};\nconst actionId = action.action_id || '';\n\n// Parse action value\nlet actionValue = {};\nif (action.value) {\n  try {\n    actionValue = JSON.parse(action.value);\n  } catch (e) {\n    actionValue = {};\n  }\n}\n\n// Get user and channel info\nconst user = payload.user || {};\nconst channel = payload.channel || {};\n\n// Parse action type from action_id (format: aiops_<action_type>)\nconst actionType = actionId.replace('aiops_', '') || 'unknown';\n\nreturn [{\n  actionType: actionType,\n  actionId: actionId,\n  target: actionValue.target || 'unknown',\n  alertSource: actionValue.alert_source || 'unknown',\n  alertType: actionValue.alert_type || 'unknown',\n  context: actionValue.context || {},\n  requestedBy: user.username || user.name || 'unknown',\n  channel: channel.id || 'unknown',\n  responseUrl: payload.response_url || '',\n  timestamp: new Date().toISOString(),\n  originalPayload: payload\n}];"
+      },
+      "id": "parse-action",
+      "name": "Parse Action Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [220, 0]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.actionType }}",
+                    "rightValue": "restart_container",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "restart"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.actionType }}",
+                    "rightValue": "check_logs",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "logs"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.actionType }}",
+                    "rightValue": "query_metrics",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "metrics"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.actionType }}",
+                    "rightValue": "check_jellyfin",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "jellyfin"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.actionType }}",
+                    "rightValue": "dismiss",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "dismiss"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.actionType }}",
+                    "rightValue": "escalate",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "escalate"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra"
+        }
+      },
+      "id": "switch-action",
+      "name": "Route by Action",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [440, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepare container restart request\nconst input = $input.first().json;\n\n// Determine host based on context\nconst hostMap = {\n  'sweetrpi-desktop': '192.168.0.19',\n  'capcorp9000': '192.168.0.52',\n  'capcorplee': '192.168.0.51'\n};\n\n// Extract container and host from context\nconst container = input.context?.container_name || input.context?.container || input.target;\nconst hostName = input.context?.host || 'sweetrpi-desktop';\nconst hostIp = hostMap[hostName] || hostName;\n\nreturn [{\n  ...input,\n  container,\n  hostName,\n  hostIp,\n  dockerApiUrl: `http://${hostIp}:2375/containers/${container}/restart`\n}];"
+      },
+      "id": "prep-restart",
+      "name": "Prepare Restart",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [700, -400]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.dockerApiUrl }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "docker-restart",
+      "name": "Docker Restart",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [920, -400],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Format restart result\nconst input = $input.first().json;\nconst prepData = $('Prepare Restart').first().json;\n\nconst success = input.statusCode === undefined || input.statusCode === 204;\nconst tz = $env.TIMEZONE || 'America/Chicago';\nconst timeStr = new Date().toLocaleString('en-US', { timeZone: tz, dateStyle: 'short', timeStyle: 'short' });\n\nconst resultMessage = success \n  ? `:white_check_mark: *Container Restarted Successfully*\\n\\nContainer \\`${prepData.container}\\` on \\`${prepData.hostName}\\` has been restarted.\\n\\n_Action performed by ${prepData.requestedBy} at ${timeStr}_`\n  : `:x: *Container Restart Failed*\\n\\nFailed to restart \\`${prepData.container}\\` on \\`${prepData.hostName}\\`.\\n\\nError: ${input.error?.message || JSON.stringify(input)}\\n\\n_Attempted by ${prepData.requestedBy} at ${timeStr}_`;\n\nreturn [{\n  success,\n  resultMessage,\n  responseUrl: prepData.responseUrl,\n  actionType: 'restart_container'\n}];"
+      },
+      "id": "format-restart-result",
+      "name": "Format Restart Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1140, -400]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Query Loki for container logs\nconst input = $input.first().json;\n\n// Build Loki query based on context\nconst container = input.context?.container_name || input.context?.container || input.target;\nconst query = `{container=\"${container}\"}`;\n\nreturn [{\n  ...input,\n  container,\n  lokiQuery: query,\n  lokiUrl: `http://192.168.0.19:3100/loki/api/v1/query_range`\n}];"
+      },
+      "id": "prep-logs",
+      "name": "Prepare Logs Query",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [700, -200]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $json.lokiUrl }}",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "query",
+              "value": "={{ $json.lokiQuery }}"
+            },
+            {
+              "name": "limit",
+              "value": "50"
+            },
+            {
+              "name": "start",
+              "value": "={{ Math.floor((Date.now() - 3600000) / 1000) }}"
+            },
+            {
+              "name": "end",
+              "value": "={{ Math.floor(Date.now() / 1000) }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "loki-query",
+      "name": "Query Loki",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [920, -200],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Format log query result\nconst input = $input.first().json;\nconst prepData = $('Prepare Logs Query').first().json;\n\nconst tz = $env.TIMEZONE || 'America/Chicago';\nconst timeStr = new Date().toLocaleString('en-US', { timeZone: tz, dateStyle: 'short', timeStyle: 'short' });\n\nlet resultMessage;\n\nif (input.data?.result && input.data.result.length > 0) {\n  // Extract log lines\n  const logs = [];\n  for (const stream of input.data.result) {\n    for (const [ts, line] of (stream.values || [])) {\n      logs.push(line);\n    }\n  }\n  \n  const lastLogs = logs.slice(-10).join('\\n');\n  const errorCount = logs.filter(l => /error|fail|exception/i.test(l)).length;\n  const warnCount = logs.filter(l => /warn/i.test(l)).length;\n  \n  resultMessage = `:page_facing_up: *Log Analysis for \\`${prepData.container}\\`*\\n\\n*Summary:* ${logs.length} log entries in last hour\\n:red_circle: Errors: ${errorCount} | :large_yellow_circle: Warnings: ${warnCount}\\n\\n*Recent Logs:*\\n\\`\\`\\`${lastLogs.substring(0, 1500)}\\`\\`\\`\\n\\n_Retrieved by ${prepData.requestedBy} at ${timeStr}_`;\n} else {\n  resultMessage = `:information_source: *No Recent Logs Found*\\n\\nNo log entries found for \\`${prepData.container}\\` in the last hour.\\n\\n_Checked by ${prepData.requestedBy} at ${timeStr}_`;\n}\n\nreturn [{\n  success: true,\n  resultMessage,\n  responseUrl: prepData.responseUrl,\n  actionType: 'check_logs'\n}];"
+      },
+      "id": "format-logs-result",
+      "name": "Format Logs Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1140, -200]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepare Prometheus metrics query\nconst input = $input.first().json;\n\n// Build query based on context\nlet query = 'up';\nif (input.context?.resource_type === 'cpu') {\n  query = '100 - (avg by(instance) (rate(node_cpu_seconds_total{mode=\"idle\"}[5m])) * 100)';\n} else if (input.context?.resource_type === 'memory') {\n  query = '(1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) * 100';\n} else if (input.context?.resource_type === 'disk') {\n  query = '(1 - node_filesystem_avail_bytes{mountpoint=\"/\"} / node_filesystem_size_bytes{mountpoint=\"/\"}) * 100';\n} else if (input.context?.container) {\n  query = `container_memory_usage_bytes{name=\"${input.context.container}\"}`;\n}\n\nreturn [{\n  ...input,\n  prometheusQuery: query,\n  prometheusUrl: 'http://192.168.0.19:9090/api/v1/query'\n}];"
+      },
+      "id": "prep-metrics",
+      "name": "Prepare Metrics Query",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [700, 0]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $json.prometheusUrl }}",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "query",
+              "value": "={{ $json.prometheusQuery }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "prometheus-query",
+      "name": "Query Prometheus",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [920, 0],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Format metrics result\nconst input = $input.first().json;\nconst prepData = $('Prepare Metrics Query').first().json;\n\nconst tz = $env.TIMEZONE || 'America/Chicago';\nconst timeStr = new Date().toLocaleString('en-US', { timeZone: tz, dateStyle: 'short', timeStyle: 'short' });\n\nlet resultMessage;\n\nif (input.data?.result && input.data.result.length > 0) {\n  const metrics = input.data.result.map(r => {\n    const instance = r.metric?.instance || r.metric?.name || 'unknown';\n    const value = parseFloat(r.value?.[1] || 0).toFixed(2);\n    return `• ${instance}: ${value}`;\n  }).join('\\n');\n  \n  resultMessage = `:bar_chart: *Metrics Query Results*\\n\\n*Query:* \\`${prepData.prometheusQuery}\\`\\n\\n*Results:*\\n${metrics}\\n\\n_Queried by ${prepData.requestedBy} at ${timeStr}_`;\n} else {\n  resultMessage = `:information_source: *No Metrics Found*\\n\\n*Query:* \\`${prepData.prometheusQuery}\\`\\n\\nNo data returned from Prometheus.\\n\\n_Checked by ${prepData.requestedBy} at ${timeStr}_`;\n}\n\nreturn [{\n  success: true,\n  resultMessage,\n  responseUrl: prepData.responseUrl,\n  actionType: 'query_metrics'\n}];"
+      },
+      "id": "format-metrics-result",
+      "name": "Format Metrics Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1140, 0]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "http://192.168.0.51:8096/System/Info/Public",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "jellyfin-status",
+      "name": "Query Jellyfin",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [700, 200],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Format Jellyfin status result\nconst input = $input.first().json;\nconst actionData = $('Parse Action Request').first().json;\n\nconst tz = $env.TIMEZONE || 'America/Chicago';\nconst timeStr = new Date().toLocaleString('en-US', { timeZone: tz, dateStyle: 'short', timeStyle: 'short' });\n\nlet resultMessage;\n\nif (input.ServerName) {\n  // Success - Jellyfin responded\n  resultMessage = `:tv: *Jellyfin Server Status*\\n\\n:white_check_mark: *Server Online*\\n\\n• *Server Name:* ${input.ServerName}\\n• *Version:* ${input.Version || 'unknown'}\\n• *OS:* ${input.OperatingSystem || 'unknown'}\\n• *Architecture:* ${input.SystemArchitecture || 'unknown'}\\n• *Local Address:* ${input.LocalAddress || 'unknown'}\\n\\n_Checked by ${actionData.requestedBy} at ${timeStr}_`;\n} else if (input.error) {\n  // Error response\n  resultMessage = `:x: *Jellyfin Server Unreachable*\\n\\nFailed to connect to Jellyfin server at \\`192.168.0.51:8096\\`\\n\\nError: ${input.error.message || 'Connection failed'}\\n\\n_Checked by ${actionData.requestedBy} at ${timeStr}_`;\n} else {\n  // Unknown response\n  resultMessage = `:warning: *Jellyfin Status Unknown*\\n\\nReceived unexpected response from Jellyfin.\\n\\n\\`\\`\\`${JSON.stringify(input, null, 2).substring(0, 500)}\\`\\`\\`\\n\\n_Checked by ${actionData.requestedBy} at ${timeStr}_`;\n}\n\nreturn [{\n  success: !!input.ServerName,\n  resultMessage,\n  responseUrl: actionData.responseUrl,\n  actionType: 'check_jellyfin'\n}];"
+      },
+      "id": "format-jellyfin-result",
+      "name": "Format Jellyfin Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [920, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Handle dismiss action - just acknowledge\nconst input = $input.first().json;\n\nconst tz = $env.TIMEZONE || 'America/Chicago';\nconst timeStr = new Date().toLocaleString('en-US', { timeZone: tz, dateStyle: 'short', timeStyle: 'short' });\n\nconst resultMessage = `:white_check_mark: *Alert Dismissed*\\n\\nThis alert has been acknowledged and dismissed.\\n\\n_Dismissed by ${input.requestedBy} at ${timeStr}_`;\n\nreturn [{\n  success: true,\n  resultMessage,\n  responseUrl: input.responseUrl,\n  actionType: 'dismiss'\n}];"
+      },
+      "id": "handle-dismiss",
+      "name": "Handle Dismiss",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [700, 400]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Handle escalate action\nconst input = $input.first().json;\n\nconst tz = $env.TIMEZONE || 'America/Chicago';\nconst timeStr = new Date().toLocaleString('en-US', { timeZone: tz, dateStyle: 'short', timeStyle: 'short' });\n\nconst resultMessage = `:rotating_light: *Alert Escalated*\\n\\nThis alert has been marked for manual investigation.\\n\\n*Original Alert Source:* ${input.alertSource}\\n*Alert Type:* ${input.alertType}\\n*Context:* ${JSON.stringify(input.context)}\\n\\n_Escalated by ${input.requestedBy} at ${timeStr}_\\n\\n:point_right: Please investigate this issue manually.`;\n\nreturn [{\n  success: true,\n  resultMessage,\n  responseUrl: input.responseUrl,\n  actionType: 'escalate'\n}];"
+      },
+      "id": "handle-escalate",
+      "name": "Handle Escalate",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [700, 600]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Handle unknown action type\nconst input = $input.first().json;\n\nconst tz = $env.TIMEZONE || 'America/Chicago';\nconst timeStr = new Date().toLocaleString('en-US', { timeZone: tz, dateStyle: 'short', timeStyle: 'short' });\n\nconst resultMessage = `:warning: *Unknown Action Type*\\n\\nReceived unrecognized action: \\`${input.actionType}\\`\\n\\nNo handler available for this action type.\\n\\n_Received at ${timeStr}_`;\n\nreturn [{\n  success: false,\n  resultMessage,\n  responseUrl: input.responseUrl,\n  actionType: input.actionType\n}];"
+      },
+      "id": "handle-unknown",
+      "name": "Handle Unknown",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [700, 800]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.responseUrl }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"replace_original\": true,\n  \"text\": \"Action completed\",\n  \"blocks\": [\n    {\n      \"type\": \"section\",\n      \"text\": {\n        \"type\": \"mrkdwn\",\n        \"text\": {{ JSON.stringify($json.resultMessage) }}\n      }\n    }\n  ]\n}",
+        "options": {}
+      },
+      "id": "send-result",
+      "name": "Send Result to Slack",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1400, 200],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "respond-webhook",
+      "name": "Acknowledge Slack",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1620, 200]
+    }
+  ],
+  "connections": {
+    "Action Webhook": {
+      "main": [
+        [
+          {
+            "node": "Parse Action Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Action Request": {
+      "main": [
+        [
+          {
+            "node": "Route by Action",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route by Action": {
+      "main": [
+        [
+          {
+            "node": "Prepare Restart",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Prepare Logs Query",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Prepare Metrics Query",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Query Jellyfin",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Handle Dismiss",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Handle Escalate",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Handle Unknown",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Restart": {
+      "main": [
+        [
+          {
+            "node": "Docker Restart",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Docker Restart": {
+      "main": [
+        [
+          {
+            "node": "Format Restart Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Restart Result": {
+      "main": [
+        [
+          {
+            "node": "Send Result to Slack",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Logs Query": {
+      "main": [
+        [
+          {
+            "node": "Query Loki",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Query Loki": {
+      "main": [
+        [
+          {
+            "node": "Format Logs Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Logs Result": {
+      "main": [
+        [
+          {
+            "node": "Send Result to Slack",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Metrics Query": {
+      "main": [
+        [
+          {
+            "node": "Query Prometheus",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Query Prometheus": {
+      "main": [
+        [
+          {
+            "node": "Format Metrics Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Metrics Result": {
+      "main": [
+        [
+          {
+            "node": "Send Result to Slack",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Query Jellyfin": {
+      "main": [
+        [
+          {
+            "node": "Format Jellyfin Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Jellyfin Result": {
+      "main": [
+        [
+          {
+            "node": "Send Result to Slack",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Handle Dismiss": {
+      "main": [
+        [
+          {
+            "node": "Send Result to Slack",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Handle Escalate": {
+      "main": [
+        [
+          {
+            "node": "Send Result to Slack",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Handle Unknown": {
+      "main": [
+        [
+          {
+            "node": "Send Result to Slack",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Result to Slack": {
+      "main": [
+        [
+          {
+            "node": "Acknowledge Slack",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": [
+    {
+      "name": "ai-ops"
+    },
+    {
+      "name": "actions"
+    },
+    {
+      "name": "homelab"
+    }
+  ],
+  "triggerCount": 1,
+  "updatedAt": "2025-12-29T00:00:00.000Z",
+  "versionId": "1"
+}

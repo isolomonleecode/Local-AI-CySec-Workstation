@@ -1,0 +1,319 @@
+{
+  "name": "Resource Usage Alerter",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 10
+            }
+          ]
+        }
+      },
+      "id": "schedule-trigger",
+      "name": "Every 10 Minutes",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "http://192.168.0.19:9090/api/v1/query",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "query",
+              "value": "(1 - node_filesystem_avail_bytes{mountpoint=~\"/|/mnt/.*\"} / node_filesystem_size_bytes{mountpoint=~\"/|/mnt/.*\"}) * 100"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "query-disk",
+      "name": "Query Disk Usage",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [220, -150],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "http://192.168.0.19:9090/api/v1/query",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "query",
+              "value": "100 - (avg by(instance) (rate(node_cpu_seconds_total{mode=\"idle\"}[5m])) * 100)"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "query-cpu",
+      "name": "Query CPU Usage",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [220, 0],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "http://192.168.0.19:9090/api/v1/query",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "query",
+              "value": "(1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) * 100"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "query-memory",
+      "name": "Query Memory Usage",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [220, 150],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Analyze resource usage and generate alerts\n// Get data directly from previous nodes (no Merge node needed)\nconst diskData = $('Query Disk Usage').first().json || {};\nconst cpuData = $('Query CPU Usage').first().json || {};\nconst memData = $('Query Memory Usage').first().json || {};\n\nconst THRESHOLDS = {\n  disk: { warning: 85, critical: 95 },\n  cpu: { warning: 80, critical: 95 },\n  memory: { warning: 85, critical: 95 }\n};\n\nconst alerts = [];\nconst metrics = [];\n\n// Process disk usage\nif (diskData?.data?.result) {\n  for (const metric of diskData.data.result) {\n    const instance = metric.metric?.instance || 'unknown';\n    const mountpoint = metric.metric?.mountpoint || '/';\n    const usage = parseFloat(metric.value?.[1]) || 0;\n    \n    metrics.push({ type: 'disk', instance, mountpoint, usage: usage.toFixed(1) });\n    \n    if (usage >= THRESHOLDS.disk.critical) {\n      alerts.push({\n        severity: 'critical',\n        type: 'disk',\n        message: `CRITICAL: Disk usage at ${usage.toFixed(1)}% on ${instance} (${mountpoint})`\n      });\n    } else if (usage >= THRESHOLDS.disk.warning) {\n      alerts.push({\n        severity: 'warning',\n        type: 'disk',\n        message: `WARNING: Disk usage at ${usage.toFixed(1)}% on ${instance} (${mountpoint})`\n      });\n    }\n  }\n}\n\n// Process CPU usage\nif (cpuData?.data?.result) {\n  for (const metric of cpuData.data.result) {\n    const instance = metric.metric?.instance || 'unknown';\n    const usage = parseFloat(metric.value?.[1]) || 0;\n    \n    metrics.push({ type: 'cpu', instance, usage: usage.toFixed(1) });\n    \n    if (usage >= THRESHOLDS.cpu.critical) {\n      alerts.push({\n        severity: 'critical',\n        type: 'cpu',\n        message: `CRITICAL: CPU usage at ${usage.toFixed(1)}% on ${instance}`\n      });\n    } else if (usage >= THRESHOLDS.cpu.warning) {\n      alerts.push({\n        severity: 'warning',\n        type: 'cpu',\n        message: `WARNING: CPU usage at ${usage.toFixed(1)}% on ${instance}`\n      });\n    }\n  }\n}\n\n// Process memory usage\nif (memData?.data?.result) {\n  for (const metric of memData.data.result) {\n    const instance = metric.metric?.instance || 'unknown';\n    const usage = parseFloat(metric.value?.[1]) || 0;\n    \n    metrics.push({ type: 'memory', instance, usage: usage.toFixed(1) });\n    \n    if (usage >= THRESHOLDS.memory.critical) {\n      alerts.push({\n        severity: 'critical',\n        type: 'memory',\n        message: `CRITICAL: Memory usage at ${usage.toFixed(1)}% on ${instance}`\n      });\n    } else if (usage >= THRESHOLDS.memory.warning) {\n      alerts.push({\n        severity: 'warning',\n        type: 'memory',\n        message: `WARNING: Memory usage at ${usage.toFixed(1)}% on ${instance}`\n      });\n    }\n  }\n}\n\nreturn [{\n  alerts,\n  metrics,\n  hasAlerts: alerts.length > 0,\n  criticalCount: alerts.filter(a => a.severity === 'critical').length,\n  warningCount: alerts.filter(a => a.severity === 'warning').length,\n  timestamp: new Date().toISOString()\n}];"
+      },
+      "id": "analyze-resources",
+      "name": "Analyze Resources",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [500, 0]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "alert-count-check",
+              "leftValue": "={{ $json.alerts.length }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-alerts",
+      "name": "Has Alerts?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [720, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Format Slack message for resource alerts\nconst tz = $env.TIMEZONE || 'America/Chicago';\nconst formatTime = (date) => date.toLocaleString('en-US', { timeZone: tz, dateStyle: 'short', timeStyle: 'short' });\n\nconst data = $input.first().json;\n\nconst blocks = [\n  {\n    type: 'header',\n    text: {\n      type: 'plain_text',\n      text: '⚠️ Resource Usage Alert',\n      emoji: true\n    }\n  },\n  {\n    type: 'section',\n    text: {\n      type: 'mrkdwn',\n      text: `*Critical:* ${data.criticalCount} | *Warning:* ${data.warningCount}`\n    }\n  },\n  { type: 'divider' }\n];\n\n// Group alerts by type\nconst alertsByType = {};\nfor (const alert of data.alerts) {\n  if (!alertsByType[alert.type]) alertsByType[alert.type] = [];\n  alertsByType[alert.type].push(alert);\n}\n\nfor (const [type, alerts] of Object.entries(alertsByType)) {\n  const icon = type === 'disk' ? '💾' : type === 'cpu' ? '🖥️' : '🧠';\n  blocks.push({\n    type: 'section',\n    text: {\n      type: 'mrkdwn',\n      text: `${icon} *${type.toUpperCase()}*\\n${alerts.map(a => a.message).join('\\n')}`\n    }\n  });\n}\n\nblocks.push({\n  type: 'context',\n  elements: [{\n    type: 'mrkdwn',\n    text: `Checked at ${formatTime(new Date())}`\n  }]\n});\n\nreturn [{\n  blocks: blocks,\n  text: `Resource Alert: ${data.criticalCount} critical, ${data.warningCount} warning`\n}];"
+      },
+      "id": "format-slack",
+      "name": "Format Slack Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [940, -100]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SLACK_WEBHOOK_URL }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "id": "slack-notify",
+      "name": "Send Slack Alert",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1160, -100]
+    },
+    {
+      "parameters": {},
+      "id": "no-op",
+      "name": "Resources OK",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [940, 100]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Format alert for AI Operations Assistant\nconst slackData = $input.first().json;\nconst analysisData = $('Analyze Resources').first().json;\n\n// Determine primary resource type from alerts\nconst resourceTypes = [...new Set(analysisData.alerts.map(a => a.type))];\nconst primaryType = resourceTypes[0] || 'resource';\n\n// Build standardized alert payload\nconst alertPayload = {\n  source: 'resource-usage-alerter',\n  alert_type: `${primaryType}_threshold`,\n  severity: analysisData.criticalCount > 0 ? 'critical' : 'warning',\n  title: `Resource Usage Alert: ${analysisData.alerts.length} threshold(s) exceeded`,\n  message: analysisData.alerts.map(a => a.message).join('; '),\n  context: {\n    resource_types: resourceTypes,\n    metrics: analysisData.metrics,\n    critical_count: analysisData.criticalCount,\n    warning_count: analysisData.warningCount\n  },\n  timestamp: new Date().toISOString(),\n  original_alert: analysisData\n};\n\nreturn [alertPayload];"
+      },
+      "id": "format-ai-alert",
+      "name": "Format AI Alert",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1380, -100]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://192.168.0.52:5678/webhook/ai-ops-triage",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "forward-ai-ops",
+      "name": "Forward to AI Triage",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1600, -100],
+      "continueOnFail": true
+    }
+  ],
+  "connections": {
+    "Every 10 Minutes": {
+      "main": [
+        [
+          {
+            "node": "Query Disk Usage",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Query Disk Usage": {
+      "main": [
+        [
+          {
+            "node": "Query CPU Usage",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Query CPU Usage": {
+      "main": [
+        [
+          {
+            "node": "Query Memory Usage",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Query Memory Usage": {
+      "main": [
+        [
+          {
+            "node": "Analyze Resources",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Analyze Resources": {
+      "main": [
+        [
+          {
+            "node": "Has Alerts?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Alerts?": {
+      "main": [
+        [
+          {
+            "node": "Format Slack Message",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Resources OK",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Slack Message": {
+      "main": [
+        [
+          {
+            "node": "Send Slack Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Slack Alert": {
+      "main": [
+        [
+          {
+            "node": "Format AI Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format AI Alert": {
+      "main": [
+        [
+          {
+            "node": "Forward to AI Triage",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": [
+    {
+      "name": "monitoring"
+    },
+    {
+      "name": "resources"
+    },
+    {
+      "name": "homelab"
+    }
+  ],
+  "triggerCount": 1,
+  "updatedAt": "2025-12-29T00:00:00.000Z",
+  "versionId": "3"
+}

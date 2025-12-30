@@ -1,0 +1,213 @@
+{
+  "name": "AI Operations Assistant",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "ai-ops-triage",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Alert Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [0, 0],
+      "webhookId": "ai-ops-triage"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Normalize alert format from different monitoring sources\nconst input = $input.first().json;\n\n// Extract common fields with fallbacks\nconst normalized = {\n  source: input.source || 'unknown',\n  alert_type: input.alert_type || input.type || 'general',\n  severity: input.severity || 'warning',\n  title: input.title || input.message?.substring(0, 50) || 'Alert',\n  message: input.message || JSON.stringify(input.alerts?.[0] || input),\n  context: input.context || {},\n  timestamp: input.timestamp || new Date().toISOString(),\n  original_alert: input\n};\n\n// Add source-specific context enrichment\nswitch (normalized.source) {\n  case 'container-health-monitor':\n    normalized.context.host = input.context?.host || 'unknown';\n    normalized.context.container = input.context?.container_name || 'unknown';\n    break;\n  case 'resource-usage-alerter':\n    normalized.context.resource_type = input.context?.type || 'unknown';\n    normalized.context.usage_percent = input.context?.usage || 0;\n    break;\n  case 'dns-anomaly-detector':\n    normalized.context.anomaly_type = input.context?.anomaly_type || 'query_spike';\n    break;\n  case 'security-event-correlator':\n    normalized.context.threat_level = input.context?.threat_level || 'medium';\n    break;\n  case 'media-stack-status':\n    normalized.context.service = input.context?.service || 'unknown';\n    break;\n}\n\nreturn [normalized];"
+      },
+      "id": "normalize-alert",
+      "name": "Normalize Alert",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [220, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build AI prompt for homelab operations assistant\nconst alert = $input.first().json;\n\nconst systemPrompt = `You are an AI Operations Assistant for a homelab environment. Analyze the following alert and provide:\n\n1. **Diagnosis**: What is likely causing this issue?\n2. **Risk Assessment**: How urgent is this? (low/medium/high/critical)\n3. **Recommended Actions**: What steps should be taken to resolve this?\n\nAvailable remediation actions you can suggest:\n- restart_container: Restart a specific Docker container\n- check_logs: Retrieve and analyze recent logs\n- query_metrics: Check current resource metrics\n- check_jellyfin: Check Jellyfin server health and library status\n- dismiss: Mark as false positive / no action needed\n- escalate: Requires manual investigation\n\nEnvironment context:\n- Hosts: sweetrpi-desktop (192.168.0.19), capcorp9000 (192.168.0.52), capcorplee (192.168.0.51/Unraid)\n- Services: Prometheus, Grafana, n8n, LocalAI, Home Assistant, *arr stack (Sonarr, Radarr, Prowlarr), Jellyfin (media server on Unraid)\n- Monitoring: cAdvisor for container metrics, node_exporter for host metrics, Pi-hole for DNS\n\nRespond ONLY with valid JSON in this exact format:\n{\n  \"diagnosis\": \"Brief explanation of the likely cause\",\n  \"risk_level\": \"low|medium|high|critical\",\n  \"recommended_actions\": [\n    {\n      \"action\": \"action_type\",\n      \"target\": \"specific target\",\n      \"reason\": \"why this action helps\"\n    }\n  ],\n  \"additional_context\": \"Any other relevant observations\"\n}`;\n\nconst userMessage = `ALERT DETAILS:\n- Source: ${alert.source}\n- Type: ${alert.alert_type}\n- Severity: ${alert.severity}\n- Title: ${alert.title}\n- Message: ${alert.message}\n- Context: ${JSON.stringify(alert.context, null, 2)}\n- Timestamp: ${alert.timestamp}\n\nAnalyze this alert and provide your diagnosis and recommendations.`;\n\nreturn [{\n  alert,\n  systemPrompt,\n  userMessage\n}];"
+      },
+      "id": "build-prompt",
+      "name": "Build AI Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [440, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://192.168.0.52:8080/v1/chat/completions",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"llama-3.1-8b-instruct\",\n  \"messages\": [\n    {\n      \"role\": \"system\",\n      \"content\": {{ JSON.stringify($json.systemPrompt) }}\n    },\n    {\n      \"role\": \"user\",\n      \"content\": {{ JSON.stringify($json.userMessage) }}\n    }\n  ],\n  \"temperature\": 0.3,\n  \"max_tokens\": 1000\n}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "call-localai",
+      "name": "Call LocalAI",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [660, 0],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse AI response and validate format\nconst input = $input.first().json;\nconst alert = $('Build AI Prompt').first().json.alert;\n\nlet aiResponse;\ntry {\n  // Extract the content from LocalAI response\n  const content = input.choices?.[0]?.message?.content || '';\n  \n  // Try to parse JSON from the response\n  // Handle cases where AI includes markdown code blocks\n  let jsonStr = content;\n  if (content.includes('```json')) {\n    jsonStr = content.split('```json')[1].split('```')[0].trim();\n  } else if (content.includes('```')) {\n    jsonStr = content.split('```')[1].split('```')[0].trim();\n  }\n  \n  aiResponse = JSON.parse(jsonStr);\n} catch (e) {\n  // Fallback if AI response isn't valid JSON\n  aiResponse = {\n    diagnosis: input.choices?.[0]?.message?.content || 'Unable to analyze alert',\n    risk_level: 'medium',\n    recommended_actions: [\n      {\n        action: 'check_logs',\n        target: 'affected_service',\n        reason: 'Gather more information about the issue'\n      },\n      {\n        action: 'escalate',\n        target: 'manual_review',\n        reason: 'AI analysis was inconclusive'\n      }\n    ],\n    additional_context: 'Note: AI response could not be parsed as structured JSON. Manual review recommended.'\n  };\n}\n\n// Validate required fields\nif (!aiResponse.diagnosis) aiResponse.diagnosis = 'Analysis not available';\nif (!aiResponse.risk_level) aiResponse.risk_level = 'medium';\nif (!aiResponse.recommended_actions || !Array.isArray(aiResponse.recommended_actions)) {\n  aiResponse.recommended_actions = [{ action: 'escalate', target: 'manual_review', reason: 'No actions recommended' }];\n}\n\nreturn [{\n  alert,\n  aiAnalysis: aiResponse\n}];"
+      },
+      "id": "parse-response",
+      "name": "Parse AI Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [880, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Format Slack message with Block Kit and interactive buttons\nconst data = $input.first().json;\nconst alert = data.alert;\nconst ai = data.aiAnalysis;\n\n// Use configured timezone\nconst tz = $env.TIMEZONE || 'America/Chicago';\nconst timeStr = new Date().toLocaleString('en-US', { timeZone: tz, dateStyle: 'short', timeStyle: 'short' });\n\n// Risk level emoji mapping\nconst riskEmoji = {\n  low: ':large_green_circle:',\n  medium: ':large_yellow_circle:',\n  high: ':large_orange_circle:',\n  critical: ':red_circle:'\n};\n\n// Severity emoji\nconst severityEmoji = alert.severity === 'critical' ? ':rotating_light:' : ':warning:';\n\n// Build Slack blocks\nconst blocks = [\n  {\n    type: 'header',\n    text: {\n      type: 'plain_text',\n      text: ':robot_face: AI Operations Assistant',\n      emoji: true\n    }\n  },\n  {\n    type: 'section',\n    text: {\n      type: 'mrkdwn',\n      text: `${severityEmoji} *${alert.title}*\\n\\n${alert.message}`\n    }\n  },\n  {\n    type: 'context',\n    elements: [\n      {\n        type: 'mrkdwn',\n        text: `*Source:* ${alert.source} | *Time:* ${timeStr}`\n      }\n    ]\n  },\n  { type: 'divider' },\n  {\n    type: 'section',\n    text: {\n      type: 'mrkdwn',\n      text: `:mag: *AI Diagnosis*\\n\\n${ai.diagnosis}\\n\\n*Risk Level:* ${riskEmoji[ai.risk_level] || ':white_circle:'} ${ai.risk_level.toUpperCase()}`\n    }\n  }\n];\n\n// Add additional context if present\nif (ai.additional_context) {\n  blocks.push({\n    type: 'context',\n    elements: [{\n      type: 'mrkdwn',\n      text: `:information_source: ${ai.additional_context}`\n    }]\n  });\n}\n\nblocks.push({ type: 'divider' });\n\n// Add recommended actions\nif (ai.recommended_actions && ai.recommended_actions.length > 0) {\n  let actionsText = ':bulb: *Recommended Actions*\\n\\n';\n  ai.recommended_actions.forEach((action, i) => {\n    actionsText += `${i + 1}. *${action.action}* → ${action.target}\\n   _${action.reason}_\\n`;\n  });\n  \n  blocks.push({\n    type: 'section',\n    text: {\n      type: 'mrkdwn',\n      text: actionsText\n    }\n  });\n}\n\nblocks.push({ type: 'divider' });\n\n// Generate action buttons based on recommended actions\nconst actionButtons = [];\nconst seenActions = new Set();\n\n// Add buttons for each unique recommended action\nfor (const action of ai.recommended_actions) {\n  if (seenActions.has(action.action)) continue;\n  seenActions.add(action.action);\n  \n  const buttonLabels = {\n    restart_container: ':arrows_counterclockwise: Restart',\n    check_logs: ':page_facing_up: Check Logs',\n    query_metrics: ':bar_chart: Query Metrics',\n    check_jellyfin: ':tv: Check Jellyfin',\n    dismiss: ':x: Dismiss',\n    escalate: ':mega: Escalate'\n  };\n  \n  const buttonStyles = {\n    restart_container: 'danger',\n    escalate: 'danger',\n    dismiss: undefined,\n    check_logs: 'primary',\n    query_metrics: 'primary',\n    check_jellyfin: 'primary'\n  };\n  \n  const button = {\n    type: 'button',\n    text: {\n      type: 'plain_text',\n      text: buttonLabels[action.action] || action.action,\n      emoji: true\n    },\n    action_id: `aiops_${action.action}`,\n    value: JSON.stringify({\n      action: action.action,\n      target: action.target,\n      alert_source: alert.source,\n      alert_type: alert.alert_type,\n      context: alert.context,\n      timestamp: new Date().toISOString()\n    })\n  };\n  \n  if (buttonStyles[action.action]) {\n    button.style = buttonStyles[action.action];\n  }\n  \n  actionButtons.push(button);\n}\n\n// Always add dismiss button if not already present\nif (!seenActions.has('dismiss')) {\n  actionButtons.push({\n    type: 'button',\n    text: {\n      type: 'plain_text',\n      text: ':x: Dismiss',\n      emoji: true\n    },\n    action_id: 'aiops_dismiss',\n    value: JSON.stringify({\n      action: 'dismiss',\n      target: 'alert',\n      alert_source: alert.source,\n      timestamp: new Date().toISOString()\n    })\n  });\n}\n\n// Add actions block (max 5 buttons per block)\nblocks.push({\n  type: 'actions',\n  elements: actionButtons.slice(0, 5)\n});\n\nreturn [{\n  blocks,\n  text: `AI Ops Alert: ${alert.title} (${ai.risk_level} risk)`,\n  alert,\n  aiAnalysis: ai\n}];"
+      },
+      "id": "format-slack",
+      "name": "Format Slack Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1100, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://slack.com/api/chat.postMessage",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.SLACK_BOT_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json; charset=utf-8"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"channel\": \"{{ $env.SLACK_CHANNEL_ID }}\",\n  \"blocks\": {{ JSON.stringify($json.blocks) }},\n  \"text\": {{ JSON.stringify($json.text) }}\n}",
+        "options": {}
+      },
+      "id": "send-slack",
+      "name": "Send Slack Alert",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1320, 0]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"status\": \"received\",\n  \"message\": \"Alert processed and sent to Slack\",\n  \"alert_id\": \"{{ $('Normalize Alert').first().json.timestamp }}\",\n  \"risk_level\": \"{{ $('Parse AI Response').first().json.aiAnalysis.risk_level }}\"\n}",
+        "options": {}
+      },
+      "id": "respond-webhook",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1540, 0]
+    }
+  ],
+  "connections": {
+    "Alert Webhook": {
+      "main": [
+        [
+          {
+            "node": "Normalize Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Alert": {
+      "main": [
+        [
+          {
+            "node": "Build AI Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build AI Prompt": {
+      "main": [
+        [
+          {
+            "node": "Call LocalAI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call LocalAI": {
+      "main": [
+        [
+          {
+            "node": "Parse AI Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse AI Response": {
+      "main": [
+        [
+          {
+            "node": "Format Slack Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Slack Message": {
+      "main": [
+        [
+          {
+            "node": "Send Slack Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Slack Alert": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": [
+    {
+      "name": "ai-ops"
+    },
+    {
+      "name": "monitoring"
+    },
+    {
+      "name": "homelab"
+    }
+  ],
+  "triggerCount": 1,
+  "updatedAt": "2025-12-29T00:00:00.000Z",
+  "versionId": "1"
+}

@@ -1,0 +1,566 @@
+{
+  "name": "Media Stack Status",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "triggerAtMinute": 0
+            }
+          ]
+        }
+      },
+      "id": "hourly-schedule",
+      "name": "Every Hour",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "arr-webhook",
+        "options": {}
+      },
+      "id": "arr-webhook",
+      "name": "*arr Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [0, 200],
+      "webhookId": "arr-webhook"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Define *arr services to check\nconst arrServices = [\n  { name: 'Sonarr', url: 'http://192.168.0.51:8989/api/v3/system/status', apiKeyEnv: 'SONARR_API_KEY' },\n  { name: 'Radarr', url: 'http://192.168.0.51:7878/api/v3/system/status', apiKeyEnv: 'RADARR_API_KEY' },\n  { name: 'Lidarr', url: 'http://192.168.0.51:8686/api/v1/system/status', apiKeyEnv: 'LIDARR_API_KEY' },\n  { name: 'Prowlarr', url: 'http://192.168.0.51:9696/api/v1/system/status', apiKeyEnv: 'PROWLARR_API_KEY' },\n  { name: 'Bazarr', url: 'http://192.168.0.51:6767/api/system/status', apiKeyEnv: 'BAZARR_API_KEY' },\n  { name: 'Plex', url: 'http://192.168.0.51:32400/identity', healthOnly: true },\n  { name: 'Jellyfin', url: 'http://192.168.0.51:8096/System/Info/Public', healthOnly: true },\n  { name: 'Overseerr', url: 'http://192.168.0.51:5055/api/v1/status', apiKeyEnv: 'OVERSEERR_API_KEY' }\n];\n\nreturn arrServices.map(s => ({ json: s }));"
+      },
+      "id": "define-services",
+      "name": "Define *arr Services",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [220, 0]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $json.url }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Api-Key",
+              "value": "={{ $env[$json.apiKeyEnv] || '' }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "check-services",
+      "name": "Check Service Health",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [440, 0],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Process service health check results\nconst items = $input.all();\nconst services = $('Define *arr Services').all();\nconst results = [];\n\nfor (let i = 0; i < items.length; i++) {\n  const service = services[i].json;\n  const response = items[i].json;\n  const error = items[i].error;\n  \n  let status = 'unknown';\n  let version = 'N/A';\n  let uptime = null;\n  let details = {};\n  \n  if (error) {\n    status = 'offline';\n    details.error = error.message || 'Connection failed';\n  } else if (response) {\n    status = 'online';\n    \n    // Extract version info based on service\n    if (response.version) {\n      version = response.version;\n    } else if (response.Version) {\n      version = response.Version;\n    }\n    \n    // Service-specific details\n    if (service.name === 'Plex' && response.MediaContainer) {\n      version = response.MediaContainer.version || 'N/A';\n      details.machineIdentifier = response.MediaContainer.machineIdentifier;\n    } else if (service.name === 'Jellyfin') {\n      version = response.Version || 'N/A';\n      details.serverName = response.ServerName;\n    } else if (response.startupPath) {\n      // Sonarr/Radarr style\n      details.branch = response.branch;\n      uptime = response.startTime ? \n        Math.round((Date.now() - new Date(response.startTime).getTime()) / (1000 * 60 * 60)) : null;\n    }\n  }\n  \n  results.push({\n    name: service.name,\n    status,\n    version,\n    uptime: uptime ? `${uptime}h` : null,\n    details\n  });\n}\n\nconst online = results.filter(r => r.status === 'online');\nconst offline = results.filter(r => r.status === 'offline');\n\nreturn [{\n  results,\n  summary: {\n    total: results.length,\n    online: online.length,\n    offline: offline.length\n  },\n  hasIssues: offline.length > 0,\n  timestamp: new Date().toISOString()\n}];"
+      },
+      "id": "analyze-health",
+      "name": "Analyze Service Health",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [660, 0]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "http://192.168.0.51:8989/api/v3/queue",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Api-Key",
+              "value": "={{ $env.SONARR_API_KEY || '' }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "get-sonarr-queue",
+      "name": "Get Sonarr Queue",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [660, 150],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "http://192.168.0.51:7878/api/v3/queue",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Api-Key",
+              "value": "={{ $env.RADARR_API_KEY || '' }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "get-radarr-queue",
+      "name": "Get Radarr Queue",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [660, 300],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Combine health and queue data\nconst healthData = $('Analyze Service Health').first().json;\nlet sonarrQueue = [];\nlet radarrQueue = [];\n\ntry {\n  const sonarrData = $('Get Sonarr Queue').first().json;\n  if (sonarrData?.records) {\n    sonarrQueue = sonarrData.records.map(r => ({\n      title: r.title || r.series?.title,\n      status: r.status,\n      progress: r.sizeleft && r.size ? Math.round((1 - r.sizeleft / r.size) * 100) : 0,\n      eta: r.timeleft\n    }));\n  }\n} catch (e) {}\n\ntry {\n  const radarrData = $('Get Radarr Queue').first().json;\n  if (radarrData?.records) {\n    radarrQueue = radarrData.records.map(r => ({\n      title: r.title || r.movie?.title,\n      status: r.status,\n      progress: r.sizeleft && r.size ? Math.round((1 - r.sizeleft / r.size) * 100) : 0,\n      eta: r.timeleft\n    }));\n  }\n} catch (e) {}\n\nconst activeDownloads = sonarrQueue.filter(q => q.status === 'downloading').length +\n                        radarrQueue.filter(q => q.status === 'downloading').length;\n\nreturn [{\n  ...healthData,\n  downloads: {\n    sonarr: sonarrQueue,\n    radarr: radarrQueue,\n    activeCount: activeDownloads,\n    totalQueued: sonarrQueue.length + radarrQueue.length\n  }\n}];"
+      },
+      "id": "combine-data",
+      "name": "Combine Health & Queue Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [880, 100]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "offline-count-check",
+              "leftValue": "={{ $json.summary.offline }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-issues",
+      "name": "Has Issues?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [1100, 100]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Format alert for offline services\nconst data = $input.first().json;\nconst offline = data.results.filter(r => r.status === 'offline');\n\nconst blocks = [\n  {\n    type: 'header',\n    text: {\n      type: 'plain_text',\n      text: '🎬 Media Stack Alert',\n      emoji: true\n    }\n  },\n  {\n    type: 'section',\n    text: {\n      type: 'mrkdwn',\n      text: `*${offline.length} service(s) offline*`\n    }\n  },\n  { type: 'divider' }\n];\n\nfor (const service of offline) {\n  blocks.push({\n    type: 'section',\n    text: {\n      type: 'mrkdwn',\n      text: `🔴 *${service.name}* - ${service.details.error || 'Unreachable'}`\n    }\n  });\n}\n\nblocks.push({\n  type: 'context',\n  elements: [{\n    type: 'mrkdwn',\n    text: `Online: ${data.summary.online}/${data.summary.total} | Downloads: ${data.downloads.activeCount} active`\n  }]\n});\n\nreturn [{\n  blocks,\n  text: `Media Stack Alert: ${offline.length} service(s) offline`\n}];"
+      },
+      "id": "format-alert",
+      "name": "Format Alert",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1320, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SLACK_WEBHOOK_URL }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "id": "slack-alert",
+      "name": "Send Slack Alert",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1540, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Format status digest (all healthy)\nconst data = $input.first().json;\n\nconst serviceStatus = data.results.map(r => {\n  const emoji = r.status === 'online' ? '✅' : '❌';\n  return `${emoji} *${r.name}*: v${r.version}${r.uptime ? ` (${r.uptime})` : ''}`;\n}).join('\\n');\n\nconst downloadSummary = [];\nif (data.downloads.sonarr.length > 0) {\n  downloadSummary.push(`📺 Sonarr: ${data.downloads.sonarr.length} in queue`);\n}\nif (data.downloads.radarr.length > 0) {\n  downloadSummary.push(`🎬 Radarr: ${data.downloads.radarr.length} in queue`);\n}\n\nconst blocks = [\n  {\n    type: 'header',\n    text: {\n      type: 'plain_text',\n      text: '🎬 Media Stack Status',\n      emoji: true\n    }\n  },\n  {\n    type: 'section',\n    text: {\n      type: 'mrkdwn',\n      text: serviceStatus\n    }\n  }\n];\n\nif (downloadSummary.length > 0) {\n  blocks.push(\n    { type: 'divider' },\n    {\n      type: 'section',\n      text: {\n        type: 'mrkdwn',\n        text: `*Download Activity*\\n${downloadSummary.join('\\n')}`\n      }\n    }\n  );\n}\n\nblocks.push({\n  type: 'context',\n  elements: [{\n    type: 'mrkdwn',\n    text: `Checked at ${new Date().toLocaleString()}`\n  }]\n});\n\nreturn [{\n  blocks,\n  text: `Media Stack: All ${data.summary.total} services online`\n}];"
+      },
+      "id": "format-digest",
+      "name": "Format Status Digest",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1320, 200]
+    },
+    {
+      "parameters": {},
+      "id": "no-alert",
+      "name": "Skip Alert (All Healthy)",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [1540, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Process incoming *arr webhook\nconst webhook = $input.first().json;\n\nlet event = {\n  source: 'webhook',\n  app: webhook.applicationUrl?.includes('sonarr') ? 'Sonarr' : \n       webhook.applicationUrl?.includes('radarr') ? 'Radarr' :\n       webhook.applicationUrl?.includes('lidarr') ? 'Lidarr' : 'Unknown',\n  eventType: webhook.eventType || 'Unknown',\n  timestamp: new Date().toISOString()\n};\n\n// Parse event-specific data\nif (webhook.eventType === 'Download') {\n  event.title = webhook.movie?.title || webhook.series?.title || webhook.artist?.name || 'Unknown';\n  event.quality = webhook.movieFile?.quality?.quality?.name || webhook.episodeFile?.quality?.quality?.name || 'N/A';\n  event.message = `Downloaded: ${event.title} (${event.quality})`;\n} else if (webhook.eventType === 'Grab') {\n  event.title = webhook.movie?.title || webhook.series?.title || 'Unknown';\n  event.message = `Grabbed: ${event.title}`;\n} else if (webhook.eventType === 'Health') {\n  event.level = webhook.level || 'unknown';\n  event.message = webhook.message || 'Health issue detected';\n  event.isHealthIssue = true;\n}\n\nreturn [event];"
+      },
+      "id": "parse-webhook",
+      "name": "Parse *arr Webhook",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [220, 200]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.isHealthIssue }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "if-health-issue",
+      "name": "Is Health Issue?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [440, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Format health issue alert\nconst event = $input.first().json;\n\nconst blocks = [\n  {\n    type: 'header',\n    text: {\n      type: 'plain_text',\n      text: `⚠️ ${event.app} Health Issue`,\n      emoji: true\n    }\n  },\n  {\n    type: 'section',\n    text: {\n      type: 'mrkdwn',\n      text: `*Level:* ${event.level}\\n*Message:* ${event.message}`\n    }\n  },\n  {\n    type: 'context',\n    elements: [{\n      type: 'mrkdwn',\n      text: `Received at ${new Date().toLocaleString()}`\n    }]\n  }\n];\n\nreturn [{\n  blocks,\n  text: `${event.app} Health: ${event.message}`\n}];"
+      },
+      "id": "format-health-alert",
+      "name": "Format Health Alert",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [660, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SLACK_WEBHOOK_URL }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "id": "slack-health-alert",
+      "name": "Send Health Alert",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [880, 200]
+    },
+    {
+      "parameters": {},
+      "id": "log-event",
+      "name": "Log Event (Non-Health)",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [660, 350]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Format alert for AI Operations Assistant (scheduled check)\nconst combinedData = $('Combine Health & Queue Data').first().json;\nconst offline = combinedData.results.filter(r => r.status === 'offline');\n\n// Build standardized alert payload\nconst alertPayload = {\n  source: 'media-stack-status',\n  alert_type: 'service_offline',\n  severity: offline.length > 2 ? 'critical' : 'warning',\n  title: `Media Stack Alert: ${offline.length} service(s) offline`,\n  message: offline.map(s => `${s.name}: ${s.details.error || 'Unreachable'}`).join('; '),\n  context: {\n    offline_services: offline.map(s => s.name),\n    online_count: combinedData.summary.online,\n    total_count: combinedData.summary.total,\n    service: offline[0]?.name || 'multiple'\n  },\n  timestamp: new Date().toISOString(),\n  original_alert: combinedData\n};\n\nreturn [alertPayload];"
+      },
+      "id": "format-ai-alert",
+      "name": "Format AI Alert",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1760, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://192.168.0.52:5678/webhook/ai-ops-triage",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "forward-ai-ops",
+      "name": "Forward to AI Triage",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1980, 0],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Format health alert for AI Operations Assistant (webhook)\nconst eventData = $('Parse *arr Webhook').first().json;\n\n// Build standardized alert payload\nconst alertPayload = {\n  source: 'media-stack-status',\n  alert_type: 'arr_health_issue',\n  severity: eventData.level === 'error' ? 'critical' : 'warning',\n  title: `${eventData.app} Health Issue`,\n  message: eventData.message,\n  context: {\n    app: eventData.app,\n    level: eventData.level,\n    service: eventData.app?.toLowerCase() || 'media'\n  },\n  timestamp: new Date().toISOString(),\n  original_alert: eventData\n};\n\nreturn [alertPayload];"
+      },
+      "id": "format-ai-health-alert",
+      "name": "Format AI Health Alert",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1100, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://192.168.0.52:5678/webhook/ai-ops-triage",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "forward-ai-ops-health",
+      "name": "Forward Health to AI",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1320, 200],
+      "continueOnFail": true
+    }
+  ],
+  "connections": {
+    "Every Hour": {
+      "main": [
+        [
+          {
+            "node": "Define *arr Services",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "*arr Webhook": {
+      "main": [
+        [
+          {
+            "node": "Parse *arr Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Define *arr Services": {
+      "main": [
+        [
+          {
+            "node": "Check Service Health",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Service Health": {
+      "main": [
+        [
+          {
+            "node": "Analyze Service Health",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get Sonarr Queue",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get Radarr Queue",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Analyze Service Health": {
+      "main": [
+        [
+          {
+            "node": "Combine Health & Queue Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Sonarr Queue": {
+      "main": [
+        [
+          {
+            "node": "Combine Health & Queue Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Radarr Queue": {
+      "main": [
+        [
+          {
+            "node": "Combine Health & Queue Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Combine Health & Queue Data": {
+      "main": [
+        [
+          {
+            "node": "Has Issues?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Issues?": {
+      "main": [
+        [
+          {
+            "node": "Format Alert",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Format Status Digest",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Alert": {
+      "main": [
+        [
+          {
+            "node": "Send Slack Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Status Digest": {
+      "main": [
+        [
+          {
+            "node": "Skip Alert (All Healthy)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse *arr Webhook": {
+      "main": [
+        [
+          {
+            "node": "Is Health Issue?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Health Issue?": {
+      "main": [
+        [
+          {
+            "node": "Format Health Alert",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log Event (Non-Health)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Health Alert": {
+      "main": [
+        [
+          {
+            "node": "Send Health Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Slack Alert": {
+      "main": [
+        [
+          {
+            "node": "Format AI Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format AI Alert": {
+      "main": [
+        [
+          {
+            "node": "Forward to AI Triage",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Health Alert": {
+      "main": [
+        [
+          {
+            "node": "Format AI Health Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format AI Health Alert": {
+      "main": [
+        [
+          {
+            "node": "Forward Health to AI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": [
+    {
+      "name": "media"
+    },
+    {
+      "name": "arr"
+    },
+    {
+      "name": "homelab"
+    }
+  ],
+  "triggerCount": 2,
+  "updatedAt": "2025-12-27T00:00:00.000Z",
+  "versionId": "1"
+}

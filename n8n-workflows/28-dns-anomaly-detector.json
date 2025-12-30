@@ -1,0 +1,433 @@
+{
+  "name": "DNS Anomaly Detector",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 15
+            }
+          ]
+        }
+      },
+      "id": "schedule-trigger",
+      "name": "Every 15 Minutes",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://192.168.0.19/api/auth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\"password\": \"{{ $env.PIHOLE_PASSWORD }}\"}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "pihole-auth",
+      "name": "Authenticate to Pi-hole",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        220,
+        0
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "http://192.168.0.19/api/queries",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-FTL-SID",
+              "value": "={{ $('Authenticate to Pi-hole').first().json.session?.sid || '' }}"
+            }
+          ]
+        },
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "length",
+              "value": "100"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "get-queries",
+      "name": "Get Recent DNS Queries",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        440,
+        -75
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "http://192.168.0.19/api/stats/summary",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-FTL-SID",
+              "value": "={{ $('Authenticate to Pi-hole').first().json.session?.sid || '' }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "get-summary",
+      "name": "Get Pi-hole Summary",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        440,
+        75
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combinationMode": "multiplex",
+        "options": {}
+      },
+      "id": "merge-pihole-data",
+      "name": "Merge Pi-hole Data",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [
+        660,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Analyze DNS patterns for anomalies\n// Data comes from merged inputs - extract by position\nconst allInputs = $input.all();\n\n// Input 0 = DNS Queries, Input 1 = Pi-hole Summary\nconst queriesData = allInputs[0]?.json || {};\nconst summaryData = allInputs[1]?.json || {};\n\nconst staticData = $getWorkflowStaticData('global');\nif (!staticData.baselineStats) {\n  staticData.baselineStats = {\n    avgQueriesPerHour: 0,\n    avgBlockedPercent: 0,\n    sampleCount: 0,\n    commonDomains: {},\n    lastUpdate: null\n  };\n}\nif (!staticData.recentAlerts) staticData.recentAlerts = [];\n\nconst now = Date.now();\nconst ALERT_COOLDOWN = 60 * 60 * 1000; // 1 hour\n\n// Helper to extract client identifier from Pi-hole response\n// Pi-hole v6 returns {ip: '...', name: '...'}, v5 returns a string\nconst getClientId = (clientData) => {\n  if (!clientData) return 'unknown';\n  if (typeof clientData === 'string') return clientData;\n  if (typeof clientData === 'object') {\n    return clientData.ip || clientData.name || clientData.id || JSON.stringify(clientData);\n  }\n  return String(clientData);\n};\n\n// Check if API returned error (auth required)\nconst apiError = queriesData?.error || summaryData?.error;\nif (apiError) {\n  return [{\n    anomalies: [{\n      type: 'config_error',\n      severity: 'low',\n      title: 'Pi-hole API Authentication Required',\n      description: 'Pi-hole v6 requires session authentication. Set PIHOLE_PASSWORD env variable.',\n      recommendation: 'Ensure PIHOLE_PASSWORD is set in n8n environment variables'\n    }],\n    hasAnomalies: false,\n    stats: { totalQueries: 0, blockedQueries: 0, blockedPercent: 0, uniqueClients: 0 },\n    apiError: true,\n    timestamp: new Date().toISOString()\n  }];\n}\n\n// Pi-hole v6 API response format\nconst currentStats = {\n  totalQueries: summaryData?.queries?.total || summaryData?.dns_queries_today || 0,\n  blockedQueries: summaryData?.queries?.blocked || summaryData?.ads_blocked_today || 0,\n  blockedPercent: summaryData?.queries?.percent_blocked || summaryData?.ads_percentage_today || 0,\n  uniqueClients: summaryData?.clients?.active || summaryData?.unique_clients || 0\n};\n\n// Analyze query patterns\nconst anomalies = [];\nconst queryAnalysis = {\n  byClient: {},\n  byDomain: {},\n  suspiciousDomains: [],\n  blockedDomains: []\n};\n\n// Process queries - handle both v5 and v6 formats\nconst queries = queriesData?.queries || queriesData?.data || [];\nfor (const query of queries) {\n  // v6 format: object with domain, client (object), status fields\n  // v5 format: array [timestamp, type, domain, client (string), status]\n  const domain = query.domain || query[2] || '';\n  const client = getClientId(query.client || query[3]);\n  const status = query.status || query[4] || 0;\n  \n  if (!domain) continue;\n  \n  // Track by client\n  if (client && !queryAnalysis.byClient[client]) {\n    queryAnalysis.byClient[client] = { total: 0, blocked: 0 };\n  }\n  if (client) queryAnalysis.byClient[client].total++;\n  \n  // Track by domain\n  if (!queryAnalysis.byDomain[domain]) {\n    queryAnalysis.byDomain[domain] = 0;\n  }\n  queryAnalysis.byDomain[domain]++;\n  \n  const lowerDomain = domain.toLowerCase();\n  \n  // Pattern 1: Very long domain names (potential DGA)\n  if (domain.length > 60) {\n    queryAnalysis.suspiciousDomains.push({\n      domain,\n      reason: 'Unusually long domain name (possible DGA)',\n      client\n    });\n  }\n  \n  // Pattern 2: High entropy domain names\n  const subdomainPart = domain.split('.')[0];\n  if (subdomainPart.length > 15 && /^[a-z0-9]+$/.test(subdomainPart)) {\n    const uniqueChars = new Set(subdomainPart).size;\n    if (uniqueChars > subdomainPart.length * 0.6) {\n      queryAnalysis.suspiciousDomains.push({\n        domain,\n        reason: 'High-entropy subdomain (possible malware C2)',\n        client\n      });\n    }\n  }\n  \n  // Pattern 3: Suspicious TLDs\n  const suspiciousTLDs = ['.xyz', '.top', '.tk', '.ml', '.ga', '.cf', '.gq', '.pw'];\n  if (suspiciousTLDs.some(tld => lowerDomain.endsWith(tld))) {\n    queryAnalysis.suspiciousDomains.push({\n      domain,\n      reason: 'Suspicious TLD commonly used by malware',\n      client\n    });\n  }\n  \n  // Track blocked (v6: status 2-5, v5: status 1,4,5)\n  const blockedStatuses = ['1', '2', '3', '4', '5', 1, 2, 3, 4, 5];\n  if (blockedStatuses.includes(status)) {\n    queryAnalysis.blockedDomains.push({ domain, client });\n  }\n}\n\n// Detect anomalies\nif (staticData.baselineStats.sampleCount > 5) {\n  const avgBlocked = staticData.baselineStats.avgBlockedPercent;\n  if (currentStats.blockedPercent > avgBlocked * 1.5 && currentStats.blockedPercent > 20) {\n    const lastAlert = staticData.recentAlerts.find(a => a.type === 'blocked_spike');\n    if (!lastAlert || (now - lastAlert.time) > ALERT_COOLDOWN) {\n      anomalies.push({\n        type: 'blocked_spike',\n        severity: 'medium',\n        title: 'Unusual Blocked Traffic Spike',\n        description: `Blocked percentage is ${currentStats.blockedPercent.toFixed(1)}% vs baseline ${avgBlocked.toFixed(1)}%`,\n        recommendation: 'Check if a device is infected or misconfigured'\n      });\n      staticData.recentAlerts.push({ type: 'blocked_spike', time: now });\n    }\n  }\n}\n\nconst uniqueSuspicious = [...new Set(queryAnalysis.suspiciousDomains.map(s => s.domain))];\nif (uniqueSuspicious.length > 3) {\n  const lastAlert = staticData.recentAlerts.find(a => a.type === 'suspicious_domains');\n  if (!lastAlert || (now - lastAlert.time) > ALERT_COOLDOWN) {\n    anomalies.push({\n      type: 'suspicious_domains',\n      severity: 'high',\n      title: 'Multiple Suspicious Domain Queries',\n      description: `${uniqueSuspicious.length} potentially malicious domains detected`,\n      details: uniqueSuspicious.slice(0, 5),\n      recommendation: 'Investigate the source clients for potential malware'\n    });\n    staticData.recentAlerts.push({ type: 'suspicious_domains', time: now });\n  }\n}\n\nfor (const [client, stats] of Object.entries(queryAnalysis.byClient)) {\n  // Raised threshold: 200 queries in 15 min (~13/min) is more reasonable\n  // 50 was too low - normal devices easily hit this\n  if (stats.total > 200) {\n    const lastAlert = staticData.recentAlerts.find(a => a.type === 'excessive_queries' && a.client === client);\n    if (!lastAlert || (now - lastAlert.time) > ALERT_COOLDOWN) {\n      anomalies.push({\n        type: 'excessive_queries',\n        severity: 'medium',\n        title: 'Excessive DNS Queries from Client',\n        description: `Client ${client} made ${stats.total} queries in 15 minutes`,\n        client,\n        recommendation: 'Check for chatty applications or potential DNS tunneling'\n      });\n      staticData.recentAlerts.push({ type: 'excessive_queries', client, time: now });\n    }\n  }\n}\n\n// Update baseline\nif (currentStats.blockedPercent > 0) {\n  staticData.baselineStats.avgBlockedPercent = \n    (staticData.baselineStats.avgBlockedPercent * staticData.baselineStats.sampleCount + currentStats.blockedPercent) / \n    (staticData.baselineStats.sampleCount + 1);\n  staticData.baselineStats.sampleCount = Math.min(staticData.baselineStats.sampleCount + 1, 100);\n}\nstaticData.baselineStats.lastUpdate = new Date().toISOString();\nstaticData.recentAlerts = staticData.recentAlerts.filter(a => (now - a.time) < 24 * 60 * 60 * 1000);\n\nreturn [{\n  anomalies,\n  hasAnomalies: anomalies.length > 0,\n  stats: currentStats,\n  baseline: staticData.baselineStats,\n  queryAnalysis: {\n    totalClients: Object.keys(queryAnalysis.byClient).length,\n    uniqueDomains: Object.keys(queryAnalysis.byDomain).length,\n    suspiciousCount: uniqueSuspicious.length,\n    topDomains: Object.entries(queryAnalysis.byDomain)\n      .sort((a, b) => b[1] - a[1])\n      .slice(0, 10)\n      .map(([domain, count]) => ({ domain, count }))\n  },\n  timestamp: new Date().toISOString()\n}];"
+      },
+      "id": "analyze-dns",
+      "name": "Analyze DNS Patterns",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "anomaly-count-check",
+              "leftValue": "={{ $json.anomalies.length }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-anomalies",
+      "name": "Has Anomalies?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1100,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Format Slack alert for DNS anomalies\nconst data = $input.first().json;\n\nconst severityEmoji = {\n  critical: '\ud83d\udd34',\n  high: '\ud83d\udfe0',\n  medium: '\ud83d\udfe1',\n  low: '\ud83d\udfe2'\n};\n\nconst blocks = [\n  {\n    type: 'header',\n    text: {\n      type: 'plain_text',\n      text: '\ud83d\udd0d DNS Anomaly Detected',\n      emoji: true\n    }\n  },\n  {\n    type: 'section',\n    text: {\n      type: 'mrkdwn',\n      text: `*${data.anomalies.length} anomaly pattern(s) detected*\\nPi-hole: ${data.stats.blockedPercent.toFixed(1)}% blocked (${data.stats.blockedQueries} queries)`\n    }\n  },\n  { type: 'divider' }\n];\n\nfor (const anomaly of data.anomalies) {\n  const emoji = severityEmoji[anomaly.severity] || '\u26aa';\n  \n  let text = `${emoji} *${anomaly.severity.toUpperCase()}: ${anomaly.title}*\\n${anomaly.description}`;\n  \n  if (anomaly.details && anomaly.details.length > 0) {\n    text += `\\n\u2022 Domains: \\`${anomaly.details.slice(0, 3).join('\\`, \\`')}\\``;\n  }\n  if (anomaly.client) {\n    text += `\\n\u2022 Client: \\`${anomaly.client}\\``;\n  }\n  if (anomaly.recommendation) {\n    text += `\\n\ud83d\udca1 ${anomaly.recommendation}`;\n  }\n  \n  blocks.push({\n    type: 'section',\n    text: {\n      type: 'mrkdwn',\n      text\n    }\n  });\n}\n\nblocks.push({\n  type: 'context',\n  elements: [{\n    type: 'mrkdwn',\n    text: `Queries analyzed: ${data.queryAnalysis.uniqueDomains} domains from ${data.queryAnalysis.totalClients} clients`\n  }]\n});\n\nreturn [{\n  blocks,\n  text: `DNS Anomaly: ${data.anomalies.length} pattern(s) detected`\n}];"
+      },
+      "id": "format-alert",
+      "name": "Format DNS Alert",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        -100
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SLACK_WEBHOOK_URL }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "id": "slack-alert",
+      "name": "Send Slack Alert",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1540,
+        -100
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://192.168.0.19:3000/api/annotations",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"text\": \"DNS Anomaly: {{ $json.anomalies ? $json.anomalies.map(a => a.title).join(', ') : 'unknown' }}\",\n  \"tags\": [\"dns\", \"pihole\", \"anomaly\"]\n}",
+        "options": {}
+      },
+      "id": "grafana-annotation",
+      "name": "Create Grafana Annotation",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1760,
+        -100
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "no-anomalies",
+      "name": "DNS Patterns Normal",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        1320,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Format alert for AI Operations Assistant\nconst analysisData = $('Analyze DNS Patterns').first().json;\n\n// Build standardized alert payload\nconst alertPayload = {\n  source: 'dns-anomaly-detector',\n  alert_type: analysisData.anomalies[0]?.type || 'dns_anomaly',\n  severity: analysisData.anomalies.some(a => a.severity === 'critical') ? 'critical' : \n            analysisData.anomalies.some(a => a.severity === 'high') ? 'high' : 'medium',\n  title: `DNS Anomaly: ${analysisData.anomalies.length} pattern(s) detected`,\n  message: analysisData.anomalies.map(a => `${a.title}: ${a.description}`).join('; '),\n  context: {\n    anomaly_type: analysisData.anomalies[0]?.type || 'unknown',\n    anomalies: analysisData.anomalies,\n    stats: analysisData.stats,\n    suspicious_domains: analysisData.anomalies.flatMap(a => a.details || []).slice(0, 10)\n  },\n  timestamp: new Date().toISOString(),\n  original_alert: analysisData\n};\n\nreturn [alertPayload];"
+      },
+      "id": "format-ai-alert",
+      "name": "Format AI Alert",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1980, -100]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://192.168.0.52:5678/webhook/ai-ops-triage",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "forward-ai-ops",
+      "name": "Forward to AI Triage",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2200, -100],
+      "continueOnFail": true
+    }
+  ],
+  "connections": {
+    "Every 15 Minutes": {
+      "main": [
+        [
+          {
+            "node": "Authenticate to Pi-hole",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Authenticate to Pi-hole": {
+      "main": [
+        [
+          {
+            "node": "Get Recent DNS Queries",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get Pi-hole Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Recent DNS Queries": {
+      "main": [
+        [
+          {
+            "node": "Merge Pi-hole Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Pi-hole Summary": {
+      "main": [
+        [
+          {
+            "node": "Merge Pi-hole Data",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge Pi-hole Data": {
+      "main": [
+        [
+          {
+            "node": "Analyze DNS Patterns",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Analyze DNS Patterns": {
+      "main": [
+        [
+          {
+            "node": "Has Anomalies?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Anomalies?": {
+      "main": [
+        [
+          {
+            "node": "Format DNS Alert",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "DNS Patterns Normal",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format DNS Alert": {
+      "main": [
+        [
+          {
+            "node": "Send Slack Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Slack Alert": {
+      "main": [
+        [
+          {
+            "node": "Create Grafana Annotation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Grafana Annotation": {
+      "main": [
+        [
+          {
+            "node": "Format AI Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format AI Alert": {
+      "main": [
+        [
+          {
+            "node": "Forward to AI Triage",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": {
+    "global": {
+      "baselineStats": {
+        "avgQueriesPerHour": 0,
+        "avgBlockedPercent": 0,
+        "sampleCount": 0,
+        "commonDomains": {},
+        "lastUpdate": null
+      },
+      "recentAlerts": []
+    }
+  },
+  "tags": [
+    {
+      "name": "dns"
+    },
+    {
+      "name": "pihole"
+    },
+    {
+      "name": "security"
+    },
+    {
+      "name": "homelab"
+    }
+  ],
+  "triggerCount": 1,
+  "updatedAt": "2025-12-29T00:00:00.000Z",
+  "versionId": "2"
+}
